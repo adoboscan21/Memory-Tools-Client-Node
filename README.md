@@ -1,5 +1,3 @@
-# `memory-tools-client`
-
 A Node.js client for interacting with the MemoryTools database via its TLS-based binary protocol.
 
 ---
@@ -16,9 +14,9 @@ npm install memory-tools-client
 
 ## 📖 Usage
 
-### Initialization and Connection
+### Initialization, Connection, and Authentication
 
-The `MemoryToolsClient` class allows you to connect to your MemoryTools server. You can configure the TLS connection in several ways.
+The `MemoryToolsClient` class allows you to connect to your MemoryTools server and **authenticate**. It's highly recommended to provide user credentials for most operations.
 
 ```javascript
 import MemoryToolsClient from "memory-tools-client";
@@ -27,6 +25,8 @@ import path from "node:path"; // For handling certificate paths
 // Your MemoryTools server configuration
 const DB_HOST = "127.0.0.1";
 const DB_PORT = 8080;
+const DB_USER = "myuser";     // Your username!
+const DB_PASS = "mypassword"; // Your password!
 
 // TLS Connection Options:
 
@@ -40,6 +40,8 @@ const SERVER_CERT_PATH_SECURE = path.join(
 const clientSecure = new MemoryToolsClient(
   DB_HOST,
   DB_PORT,
+  DB_USER,
+  DB_PASS,
   SERVER_CERT_PATH_SECURE, // Path to the CA certificate that signed your server's certificate
   true // rejectUnauthorized: true (default)
 );
@@ -50,6 +52,8 @@ const clientSecure = new MemoryToolsClient(
 const clientSystemCA = new MemoryToolsClient(
   DB_HOST,
   DB_PORT,
+  DB_USER,
+  DB_PASS,
   null, // serverCertPath: null (uses system CAs)
   true // rejectUnauthorized: true (default)
 );
@@ -60,6 +64,8 @@ const clientSystemCA = new MemoryToolsClient(
 const clientInsecure = new MemoryToolsClient(
   DB_HOST,
   DB_PORT,
+  DB_USER,
+  DB_PASS,
   null, // serverCertPath: null
   false // rejectUnauthorized: false (ignores verification)
 );
@@ -69,18 +75,16 @@ async function runExample() {
 
   try {
     await client.connect();
-    console.log("Connected to the MemoryTools database.");
+    console.log(`Connected and authenticated as ${client.getAuthenticatedUsername()} to the MemoryTools database.`);
 
     // Perform your database operations here
     // ...
-  } catch (error) {
+  } catch (error: any) {
     console.error("Connection or operation error:", error.message);
   } finally {
     // Ensure the connection is closed when you're done
-    if (client.socket && !client.socket.destroyed) {
-      client.socket.end();
-      console.log("Connection closed.");
-    }
+    client.close();
+    console.log("Connection closed.");
   }
 }
 
@@ -93,12 +97,14 @@ runExample();
 
 The `MemoryToolsClient` class provides the following asynchronous methods to interact with your database:
 
-### `constructor(host: string, port: number, serverCertPath?: string | null, rejectUnauthorized?: boolean)`
+### `constructor(host: string, port: number, username: string | null = null, password: string | null = null, serverCertPath: string | null = null, rejectUnauthorized: boolean = true)`
 
 Creates a new client instance.
 
 - **`host`** (`string`): The IP address or hostname of the MemoryTools server.
 - **`port`** (`number`): The TLS port of the MemoryTools server.
+- **`username`** (`string | null`, optional, defaults to `null`): The username for authenticating with the server.
+- **`password`** (`string | null`, optional, defaults to `null`): The password for authenticating with the server.
 - **`serverCertPath`** (`string | null`, optional, defaults to `null`):
   - If a `string`, it should be the path to the Certificate Authority (CA) certificate that signed your server's certificate. This certificate will be used to verify the server's identity.
   - If `null`, Node.js will attempt to use the operating system's default CAs for verification.
@@ -106,9 +112,22 @@ Creates a new client instance.
   - If `true`, the connection will be rejected if the server's certificate cannot be verified by the provided CA or by the system's CAs.
   - If `false`, the connection will be established even if the server's certificate is invalid or cannot be verified. **Use with extreme caution in production environments.**
 
-### `connect(): Promise<void>`
+### `connect(): Promise<tls.TLSSocket>`
 
-Establishes a TLS connection to the MemoryTools server. This method will automatically reconnect if the client is disconnected when `sendCommand` is called.
+Establishes a TLS connection to the MemoryTools server and, if `username` and `password` are provided in the constructor, will attempt to authenticate the session automatically. This method will return the `tls.TLSSocket` instance once connection and authentication are successful.
+
+**Returns**: A `Promise` that resolves with the `tls.TLSSocket` object if connection and authentication are successful. **Throws**: An `Error` if connection or authentication fails.
+
+```javascript
+try {
+  const socket = await client.connect();
+  console.log("TLS connection established and authenticated.");
+  // You can use 'socket' if you need to interact directly with the TLS socket,
+  // but client methods already handle it internally.
+} catch (error) {
+  console.error("Could not connect or authenticate:", error.message);
+}
+```
 
 ### `set(key: string, value: any, ttlSeconds?: number): Promise<string>`
 
@@ -118,7 +137,7 @@ Stores a value in the main key-value store. The `value` will be automatically JS
 - **`value`** (`any`): The value to store. It will be converted to a JSON string.
 - **`ttlSeconds`** (`number`, optional, defaults to `0`): Time-to-live in seconds. `0` means no expiration.
 
-**Returns**: A `Promise` that resolves with a success message string from the server. **Throws**: An `Error` if the operation fails.
+**Returns**: A `Promise` that resolves with a success message string from the server. **Throws**: An `Error` if the operation fails (including not being authenticated).
 
 ```javascript
 await client.set(
@@ -139,7 +158,7 @@ Retrieves a value from the main key-value store. The retrieved value will be aut
 
 - **`found`** (`boolean`): `true` if the key was found, `false` otherwise.
 - **`message`** (`string`): A status message from the server.
-- **`value`** (`any | null`): The retrieved value, parsed from JSON, or `null` if not found. **Throws**: An `Error` if the operation fails (e.g., invalid JSON format for stored value, but not if the key is just not found).
+- **`value`** (`any | null`): The retrieved value, parsed from JSON, or `null` if not found. **Throws**: An `Error` if the operation fails (e.g., invalid JSON format for stored value, or not being authenticated, but not if the key is just not found).
 
 ```javascript
 const result = await client.get("myNodeKey");
@@ -162,7 +181,7 @@ Creates a new collection.
 
 - **`collectionName`** (`string`): The name of the collection to create.
 
-**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails.
+**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails (including not being authenticated).
 
 ```javascript
 await client.collectionCreate("node_users");
@@ -175,7 +194,7 @@ Deletes an entire collection and all its items.
 
 - **`collectionName`** (`string`): The name of the collection to delete.
 
-**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails.
+**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails (including not being authenticated).
 
 ```javascript
 await client.collectionDelete("node_users");
@@ -189,7 +208,7 @@ Lists all available collection names.
 **Returns**: A `Promise` that resolves to an object:
 
 - **`message`** (`string`): A status message from the server.
-- **`names`** (`string[]`): An array of collection names. **Throws**: An `Error` if the operation fails.
+- **`names`** (`string[]`): An array of collection names. **Throws**: An `Error` if the operation fails (including not being authenticated).
 
 ```javascript
 const listResult = await client.collectionList();
@@ -205,7 +224,7 @@ Stores an item within a specific collection. The `value` will be automatically J
 - **`value`** (`any`): The value to store.
 - **`ttlSeconds`** (`number`, optional, defaults to `0`): Time-to-live in seconds for this item. `0` means no expiration.
 
-**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails.
+**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails (including not being authenticated).
 
 ```javascript
 await client.collectionItemSet(
@@ -228,7 +247,7 @@ Retrieves an item from a specific collection. The retrieved value will be automa
 
 - **`found`** (`boolean`): `true` if the item was found, `false` otherwise.
 - **`message`** (`string`): A status message from the server.
-- **`value`** (`any | null`): The retrieved value, parsed from JSON, or `null` if not found. **Throws**: An `Error` if the operation fails (e.g., invalid JSON format for stored value, but not if the item is just not found).
+- **`value`** (`any | null`): The retrieved value, parsed from JSON, or `null` if not found. **Throws**: An `Error` if the operation fails (e.g., invalid JSON format for stored value, or not being authenticated, but not if the item is just not found).
 
 ```javascript
 const itemResult = await client.collectionItemGet("node_users", "user_1");
@@ -246,7 +265,7 @@ Deletes an item from a specific collection.
 - **`collectionName`** (`string`): The name of the collection.
 - **`key`** (`string`): The key of the item to delete.
 
-**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails.
+**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails (including not being authenticated).
 
 ```javascript
 await client.collectionItemDelete("node_users", "user_1");
@@ -262,11 +281,49 @@ Lists all items and their values within a specific collection. Values are automa
 **Returns**: A `Promise` that resolves to an object:
 
 - **`message`** (`string`): A status message from the server.
-- **`items`** (`{ [key: string]: any }`): An object where keys are item keys and values are the parsed item data. **Throws**: An `Error` if the operation fails.
+- **`items`** (`{ [key: string]: any }`): An object where keys are item keys and values are the parsed item data. **Throws**: An `Error` if the operation fails (including not being authenticated).
 
 ```javascript
 const itemsResult = await client.collectionItemList("node_users");
 console.log("Items in 'node_users':", itemsResult.items);
+```
+
+### `isSessionAuthenticated(): boolean`
+
+Returns `true` if the current client session is authenticated, `false` otherwise.
+
+**Returns**: `boolean`
+
+```javascript
+if (client.isSessionAuthenticated()) {
+  console.log("Client session is authenticated.");
+} else {
+  console.log("Client session is not authenticated.");
+}
+```
+
+### `getAuthenticatedUsername(): string | null`
+
+Returns the username of the currently authenticated user, or `null` if not authenticated.
+
+**Returns**: `string | null`
+
+```javascript
+const username = client.getAuthenticatedUsername();
+if (username) {
+  console.log(`Authenticated user: ${username}`);
+} else {
+  console.log("No user authenticated.");
+}
+```
+
+### `close(): void`
+
+Closes the underlying socket connection. This also resets the session's authentication state.
+
+```javascript
+client.close();
+console.log("Client connection closed.");
 ```
 
 ---
@@ -276,3 +333,5 @@ console.log("Items in 'node_users':", itemsResult.items);
 - **TLS is Essential**: Always use TLS for connections to your MemoryTools server, especially in production environments, to ensure data encryption in transit.
 - **Certificate Verification**: For production, it's **highly recommended** to set `rejectUnauthorized` to `true` (which is the default) and provide a `serverCertPath` to the CA certificate that signed your server's certificate. This verifies that you are connecting to the legitimate server and prevents man-in-the-middle attacks.
 - **`rejectUnauthorized: false`**: Only use `rejectUnauthorized: false` for development or testing purposes, where the security implications are understood and acceptable (e.g., self-signed certificates in a controlled, isolated environment). Never use this in production.
+- **Authentication Credentials**: Always pass user credentials (`username` and `password`) to the `MemoryToolsClient` constructor to ensure your operations are authorized. Without credentials, you may only be able to perform anonymous operations, which the server will likely restrict.
+- **Credential Management**: Avoid hardcoding credentials in your code. Instead, use environment variables, a secret management service, or a secure configuration file to manage your database credentials.
