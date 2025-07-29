@@ -10,9 +10,15 @@
     "type": "git",
     "url": "git+https://github.com/adoboscan21/Memory-Tools-Client-Node.git"
   },
-  "keywords": [],
+  "keywords": [
+    "memory-tools",
+    "database",
+    "client",
+    "nodejs",
+    "tls"
+  ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "bugs": {
     "url": "https://github.com/adoboscan21/Memory-Tools-Client-Node/issues"
