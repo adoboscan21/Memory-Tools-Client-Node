@@ -1,0 +1,21 @@
+{
+  "name": "memory-tools-client",
+  "version": "1.0.0",
+  "description": "Memory-Tools client Nodejs library.",
+  "main": "memory-tools-client.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adoboscan21/Memory-Tools-Client-Node.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/adoboscan21/Memory-Tools-Client-Node/issues"
+  },
+  "homepage": "https://github.com/adoboscan21/Memory-Tools-Client-Node#readme"
+}
