@@ -310,8 +310,8 @@ export class MemoryToolsClient {
     ]);
 
     // Log the command buffer for debugging
-    console.log("DBClient: Sending AUTH command. First byte (CMD_AUTHENTICATE):", commandBuffer[0]);
-    console.log("DBClient: Full AUTH command buffer (hex):", commandBuffer.toString('hex'));
+    // console.log("DBClient: Sending AUTH command. First byte (CMD_AUTHENTICATE):", commandBuffer[0]);
+    // console.log("DBClient: Full AUTH command buffer (hex):", commandBuffer.toString('hex'));
 
     this.socket.write(commandBuffer);
 
@@ -373,8 +373,8 @@ export class MemoryToolsClient {
     ]);
 
     // Log the command buffer for debugging
-    console.log(`DBClient: Sending command ${commandType}. First byte:`, commandBuffer[0]);
-    console.log(`DBClient: Full command buffer for ${commandType} (hex):`, commandBuffer.toString('hex'));
+    // console.log(`DBClient: Sending command ${commandType}. First byte:`, commandBuffer[0]);
+    // console.log(`DBClient: Full command buffer for ${commandType} (hex):`, commandBuffer.toString('hex'));
 
     this.socket.write(commandBuffer);
 
