@@ -1,3 +1,5 @@
+# MemoryTools Node.js Client
+
 A Node.js client for interacting with the MemoryTools database via its TLS-based binary protocol.
 
 ---
@@ -10,13 +12,11 @@ To integrate `memory-tools-client` into your Node.js project, use npm:
 npm install memory-tools-client
 ```
 
----
-
 ## 📖 Usage
 
 ### Initialization, Connection, and Authentication
 
-The `MemoryToolsClient` class allows you to connect to your MemoryTools server and **authenticate**. It's highly recommended to provide user credentials for most operations.
+The `MemoryToolsClient` class allows you to connect to your MemoryTools server and **authenticate**. Providing user credentials is highly recommended for most operations.
 
 ```javascript
 import MemoryToolsClient from "memory-tools-client";
@@ -25,7 +25,7 @@ import path from "node:path"; // For handling certificate paths
 // Your MemoryTools server configuration
 const DB_HOST = "127.0.0.1";
 const DB_PORT = 8080;
-const DB_USER = "myuser";     // Your username!
+const DB_USER = "myuser"; // Your username!
 const DB_PASS = "mypassword"; // Your password!
 
 // TLS Connection Options:
@@ -75,11 +75,13 @@ async function runExample() {
 
   try {
     await client.connect();
-    console.log(`Connected and authenticated as ${client.getAuthenticatedUsername()} to the MemoryTools database.`);
+    console.log(
+      `Connected and authenticated as ${client.getAuthenticatedUsername()} to the MemoryTools database.`
+    );
 
     // Perform your database operations here
     // ...
-  } catch (error: any) {
+  } catch (error) {
     console.error("Connection or operation error:", error.message);
   } finally {
     // Ensure the connection is closed when you're done
@@ -122,19 +124,17 @@ Establishes a TLS connection to the MemoryTools server and, if `username` and `p
 try {
   const socket = await client.connect();
   console.log("TLS connection established and authenticated.");
-  // You can use 'socket' if you need to interact directly with the TLS socket,
-  // but client methods already handle it internally.
 } catch (error) {
   console.error("Could not connect or authenticate:", error.message);
 }
 ```
 
-### `set(key: string, value: any, ttlSeconds?: number): Promise<string>`
+### `set<T = any>(key: string, value: T, ttlSeconds?: number): Promise<string>`
 
 Stores a value in the main key-value store. The `value` will be automatically JSON-serialized.
 
 - **`key`** (`string`): The key to store the value under.
-- **`value`** (`any`): The value to store. It will be converted to a JSON string.
+- **`value`** (`T`): The value to store. It will be converted to a JSON string.
 - **`ttlSeconds`** (`number`, optional, defaults to `0`): Time-to-live in seconds. `0` means no expiration.
 
 **Returns**: A `Promise` that resolves with a success message string from the server. **Throws**: An `Error` if the operation fails (including not being authenticated).
@@ -148,7 +148,7 @@ await client.set(
 console.log("Value set successfully.");
 ```
 
-### `get(key: string): Promise<{ found: boolean, message: string, value: any | null }>`
+### `get<T = any>(key: string): Promise<{ found: boolean, message: string, value: T | null }>`
 
 Retrieves a value from the main key-value store. The retrieved value will be automatically JSON-parsed.
 
@@ -158,7 +158,7 @@ Retrieves a value from the main key-value store. The retrieved value will be aut
 
 - **`found`** (`boolean`): `true` if the key was found, `false` otherwise.
 - **`message`** (`string`): A status message from the server.
-- **`value`** (`any | null`): The retrieved value, parsed from JSON, or `null` if not found. **Throws**: An `Error` if the operation fails (e.g., invalid JSON format for stored value, or not being authenticated, but not if the key is just not found).
+- **`value`** (`T | null`): The retrieved value, parsed from JSON, or `null` if not found. **Throws**: An `Error` if the operation fails (e.g., invalid JSON format for stored value, or not being authenticated, but not if the key is just not found).
 
 ```javascript
 const result = await client.get("myNodeKey");
@@ -215,13 +215,13 @@ const listResult = await client.collectionList();
 console.log("Available collections:", listResult.names);
 ```
 
-### `collectionItemSet(collectionName: string, key: string, value: any, ttlSeconds?: number): Promise<string>`
+### `collectionItemSet<T = any>(collectionName: string, key: string, value: T, ttlSeconds?: number): Promise<string>`
 
 Stores an item within a specific collection. The `value` will be automatically JSON-serialized.
 
 - **`collectionName`** (`string`): The name of the collection.
 - **`key`** (`string`): The key for the item within the collection.
-- **`value`** (`any`): The value to store.
+- **`value`** (`T`): The value to store.
 - **`ttlSeconds`** (`number`, optional, defaults to `0`): Time-to-live in seconds for this item. `0` means no expiration.
 
 **Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails (including not being authenticated).
@@ -236,7 +236,7 @@ await client.collectionItemSet(
 console.log("Item set in collection 'node_users'.");
 ```
 
-### `collectionItemGet(collectionName: string, key: string): Promise<{ found: boolean, message: string, value: any | null }>`
+### `collectionItemGet<T = any>(collectionName: string, key: string): Promise<{ found: boolean, message: string, value: T | null }>`
 
 Retrieves an item from a specific collection. The retrieved value will be automatically JSON-parsed.
 
@@ -247,7 +247,7 @@ Retrieves an item from a specific collection. The retrieved value will be automa
 
 - **`found`** (`boolean`): `true` if the item was found, `false` otherwise.
 - **`message`** (`string`): A status message from the server.
-- **`value`** (`any | null`): The retrieved value, parsed from JSON, or `null` if not found. **Throws**: An `Error` if the operation fails (e.g., invalid JSON format for stored value, or not being authenticated, but not if the item is just not found).
+- **`value`** (`T | null`): The retrieved value, parsed from JSON, or `null` if not found. **Throws**: An `Error` if the operation fails (e.g., invalid JSON format for stored value, or not being authenticated, but not if the item is just not found).
 
 ```javascript
 const itemResult = await client.collectionItemGet("node_users", "user_1");
@@ -272,7 +272,7 @@ await client.collectionItemDelete("node_users", "user_1");
 console.log("Item deleted from 'node_users'.");
 ```
 
-### `collectionItemList(collectionName: string): Promise<{ message: string, items: { [key: string]: any } }>`
+### `collectionItemList<T = any>(collectionName: string): Promise<{ message: string, items: { [key: string]: T } }>`
 
 Lists all items and their values within a specific collection. Values are automatically JSON-parsed.
 
@@ -281,11 +281,56 @@ Lists all items and their values within a specific collection. Values are automa
 **Returns**: A `Promise` that resolves to an object:
 
 - **`message`** (`string`): A status message from the server.
-- **`items`** (`{ [key: string]: any }`): An object where keys are item keys and values are the parsed item data. **Throws**: An `Error` if the operation fails (including not being authenticated).
+- **`items`** (`{ [key: string]: T }`): An object where keys are item keys and values are the parsed item data. **Throws**: An `Error` if the operation fails (including not being authenticated).
 
 ```javascript
 const itemsResult = await client.collectionItemList("node_users");
 console.log("Items in 'node_users':", itemsResult.items);
+```
+
+### `collectionQuery<T = any>(collectionName: string, query: Query): Promise<T>`
+
+Executes a complex query on a specific collection.
+
+- **`collectionName`** (`string`): The name of the collection.
+- **`query`** (`Query`): The object defining filter, order, limit, aggregations, etc.
+
+The `Query` interface is defined as:
+
+```typescript
+interface Query {
+  filter?: { [key: string]: any }; // WHERE clause equivalents (AND, OR, NOT, LIKE, BETWEEN, IN, IS NULL)
+  orderBy?: OrderByClause[]; // ORDER BY clause
+  limit?: number; // LIMIT clause
+  offset?: number; // OFFSET clause
+  count?: boolean; // COUNT(*) equivalent
+  aggregations?: { [key: string]: Aggregation }; // SUM, AVG, MIN, MAX
+  groupBy?: string[]; // GROUP BY clause
+  having?: { [key: string]: any }; // HAVING clause (filters aggregated results)
+  distinct?: string; // DISTINCT field
+}
+
+interface OrderByClause {
+  field: string;
+  direction: "asc" | "desc"; // "asc" or "desc"
+}
+
+interface Aggregation {
+  func: "sum" | "avg" | "min" | "max" | "count";
+  field: string; // Field to aggregate on, "*" for count
+}
+```
+
+**Returns**: A `Promise` that resolves with the query results as a generic type `T`. **Throws**: An `Error` if the operation fails or query JSON is invalid.
+
+```javascript
+// Example query for items in 'my_collection' where age > 25, ordered by name ascending, limit 2
+const queryResult = await client.collectionQuery("my_collection", {
+  filter: { field: "age", op: ">", value: 25 },
+  orderBy: [{ field: "name", direction: "asc" }],
+  limit: 2,
+});
+console.log("Query results:", queryResult);
 ```
 
 ### `isSessionAuthenticated(): boolean`
