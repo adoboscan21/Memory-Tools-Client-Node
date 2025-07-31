@@ -236,6 +236,14 @@ await client.collectionItemSet(
 console.log("Item set in collection 'node_users'.");
 ```
 
+```javascript
+await client.collectionItemSetMany(
+  "node_users",
+  [{ name: "Andres", email: "andres@example.com" },{ name: "Alice", email: "alice@example.com" }],
+);
+console.log("Many items set in collection 'node_users'.");
+```
+
 ### `collectionItemGet<T = any>(collectionName: string, key: string): Promise<{ found: boolean, message: string, value: T | null }>`
 
 Retrieves an item from a specific collection. The retrieved value will be automatically JSON-parsed.
