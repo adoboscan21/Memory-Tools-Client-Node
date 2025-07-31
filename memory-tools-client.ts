@@ -11,12 +11,13 @@ const CMD_COLLECTION_CREATE = 3;
 const CMD_COLLECTION_DELETE = 4;
 const CMD_COLLECTION_LIST = 5;
 const CMD_COLLECTION_ITEM_SET = 6;
-const CMD_COLLECTION_ITEM_SET_MANY = 7; // NEW: SET_COLLECTION_ITEMS_MANY collectionName, json_array
+const CMD_COLLECTION_ITEM_SET_MANY = 7;
 const CMD_COLLECTION_ITEM_GET = 8;
 const CMD_COLLECTION_ITEM_DELETE = 9;
 const CMD_COLLECTION_ITEM_LIST = 10;
-const CMD_COLLECTION_QUERY = 11; // NEW: QUERY_COLLECTION collectionName, query_json
-const CMD_AUTHENTICATE = 12;      // AUTH username, password
+const CMD_COLLECTION_QUERY = 11;
+const CMD_COLLECTION_ITEM_DELETE_MANY = 12;
+const CMD_AUTHENTICATE = 13;
 
 // RESPONSE STATUS
 const STATUS_OK = 1;
@@ -29,13 +30,20 @@ const STATUS_BAD_REQUEST = 6;
 // Helper function to get status string for better error messages
 function getStatusString(status: number): string {
   switch (status) {
-    case STATUS_OK: return "OK";
-    case STATUS_NOT_FOUND: return "NOT_FOUND";
-    case STATUS_ERROR: return "ERROR";
-    case STATUS_BAD_COMMAND: return "BAD_COMMAND";
-    case STATUS_UNAUTHORIZED: return "UNAUTHORIZED";
-    case STATUS_BAD_REQUEST: return "BAD_REQUEST";
-    default: return "UNKNOWN_STATUS";
+    case STATUS_OK:
+      return "OK";
+    case STATUS_NOT_FOUND:
+      return "NOT_FOUND";
+    case STATUS_ERROR:
+      return "ERROR";
+    case STATUS_BAD_COMMAND:
+      return "BAD_COMMAND";
+    case STATUS_UNAUTHORIZED:
+      return "UNAUTHORIZED";
+    case STATUS_BAD_REQUEST:
+      return "BAD_REQUEST";
+    default:
+      return "UNKNOWN_STATUS";
   }
 }
 
@@ -69,14 +77,14 @@ interface CollectionItemListResult<T = any> {
 // encompassing filtering, ordering, limiting, and aggregation.
 interface Query {
   filter?: { [key: string]: any }; // WHERE clause equivalents (AND, OR, NOT, LIKE, BETWEEN, IN, IS NULL)
-  orderBy?: OrderByClause[];      // ORDER BY clause
-  limit?: number;                 // LIMIT clause
-  offset?: number;                // OFFSET clause
-  count?: boolean;                // COUNT(*) equivalent
+  orderBy?: OrderByClause[]; // ORDER BY clause
+  limit?: number; // LIMIT clause
+  offset?: number; // OFFSET clause
+  count?: boolean; // COUNT(*) equivalent
   aggregations?: { [key: string]: Aggregation }; // SUM, AVG, MIN, MAX
-  groupBy?: string[];             // GROUP BY clause
+  groupBy?: string[]; // GROUP BY clause
   having?: { [key: string]: any }; // HAVING clause (filters aggregated results)
-  distinct?: string;              // DISTINCT field
+  distinct?: string; // DISTINCT field
 }
 
 // OrderByClause defines a single ordering criterion.
@@ -90,7 +98,6 @@ interface Aggregation {
   func: "sum" | "avg" | "min" | "max" | "count";
   field: string; // Field to aggregate on, "*" for count
 }
-
 
 // Helper: Writes a length-prefixed string (uint32 length + string bytes)
 function writeString(str: string): Buffer {
@@ -217,14 +224,14 @@ export class MemoryToolsClient {
           }
           if (cert.subjectaltname) {
             if (net.isIP(this.host) && cert.subjectaltname.includes(`IP:${this.host}`)) {
-                return undefined;
+              return undefined;
             }
             if (this.host === "localhost" && cert.subjectaltname.includes("DNS:localhost")) {
-                return undefined;
+              return undefined;
             }
-            const dnsSANs = cert.subjectaltname.split(', ').filter(s => s.startsWith('DNS:')).map(s => s.substring(4));
+            const dnsSANs = cert.subjectaltname.split(", ").filter((s) => s.startsWith("DNS:")).map((s) => s.substring(4));
             if (dnsSANs.includes(this.host)) {
-                return undefined;
+              return undefined;
             }
           }
           console.warn(
@@ -241,7 +248,7 @@ export class MemoryToolsClient {
       this.socket = tls.connect(options, async () => {
         if (this.socket!.authorized || !this.rejectUnauthorized) {
           console.log(`DBClient: Connected securely to ${this.host}:${this.port}`);
-          
+
           if (this.username && this.password) {
             try {
               // This calls performAuthentication, which sends CMD_AUTHENTICATE.
@@ -257,7 +264,6 @@ export class MemoryToolsClient {
             this.connectingPromise = null; // Reset promise
             resolve(this.socket!); // Resolve if no credentials provided (but server might deny commands)
           }
-
         } else {
           const authError = this.socket!.authorizationError;
           console.error(`DBClient: TLS connection unauthorized: ${authError}`);
@@ -298,7 +304,7 @@ export class MemoryToolsClient {
   private async performAuthentication(username: string, password: string): Promise<string> {
     // Ensure socket is available before sending auth command
     if (!this.socket || this.socket.destroyed) {
-        throw new Error("DBClient: Cannot perform authentication, socket is not connected.");
+      throw new Error("DBClient: Cannot perform authentication, socket is not connected.");
     }
 
     const usernameBuffer = writeString(username);
@@ -331,7 +337,7 @@ export class MemoryToolsClient {
     if (dataLen > 0) {
       dataBuffer = await readNBytes(this.socket, dataLen);
     }
-    
+
     // Process authentication response
     if (status === STATUS_OK) {
       this.isAuthenticatedSession = true;
@@ -342,13 +348,15 @@ export class MemoryToolsClient {
       this.isAuthenticatedSession = false;
       this.authenticatedUser = null;
       // Provide more specific error for unauthorized authentication attempts
-      const errorMessage = status === STATUS_UNAUTHORIZED
-        ? `Authentication failed: ${message}` // Server specific unauthorized message
-        : `Authentication failed with status ${getStatusString(status)} (${status}): ${message}`;
+      const errorMessage =
+        status === STATUS_UNAUTHORIZED
+          ? `Authentication failed: ${message}` // Server specific unauthorized message
+          : `Authentication failed with status ${getStatusString(
+              status
+            )} (${status}): ${message}`;
       throw new Error(errorMessage);
     }
   }
-
 
   /**
    * Sends a command and reads its response from the server.
@@ -360,12 +368,14 @@ export class MemoryToolsClient {
   ): Promise<CommandResponse> {
     // Ensure the socket is connected
     if (!this.socket || this.socket.destroyed) {
-        throw new Error("DBClient: Not connected. Call connect() first.");
+      throw new Error("DBClient: Not connected. Call connect() first.");
     }
 
     // Ensure the session is authenticated for any command other than CMD_AUTHENTICATE
     if (commandType !== CMD_AUTHENTICATE && !this.isAuthenticatedSession) {
-        throw new Error("DBClient: Not authenticated. Call connect() with credentials to authenticate.");
+      throw new Error(
+        "DBClient: Not authenticated. Call connect() with credentials to authenticate."
+      );
     }
 
     const commandBuffer = Buffer.concat([
@@ -397,7 +407,7 @@ export class MemoryToolsClient {
 
     return { status, message, data: dataBuffer };
   }
-
+  
   // --- Public API Methods ---
 
   /**
@@ -422,7 +432,9 @@ export class MemoryToolsClient {
     const response = await this.sendCommand(CMD_SET, payload);
 
     if (response.status !== STATUS_OK) {
-      throw new Error(`SET failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `SET failed: ${getStatusString(response.status)}: ${response.message}`
+      );
     }
     return response.message;
   }
@@ -443,7 +455,9 @@ export class MemoryToolsClient {
       return { found: false, message: response.message, value: null };
     }
     if (response.status !== STATUS_OK) {
-      throw new Error(`GET failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `GET failed: ${getStatusString(response.status)}: ${response.message}`
+      );
     }
 
     try {
@@ -472,7 +486,11 @@ export class MemoryToolsClient {
     const payload = writeString(collectionName);
     const response = await this.sendCommand(CMD_COLLECTION_CREATE, payload);
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_CREATE failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_CREATE failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
     return response.message;
   }
@@ -487,7 +505,11 @@ export class MemoryToolsClient {
     const payload = writeString(collectionName);
     const response = await this.sendCommand(CMD_COLLECTION_DELETE, payload);
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_DELETE failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_DELETE failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
     return response.message;
   }
@@ -501,7 +523,11 @@ export class MemoryToolsClient {
     const payload = Buffer.alloc(0); // LIST_COLLECTIONS command has no payload
     const response = await this.sendCommand(CMD_COLLECTION_LIST, payload);
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_LIST failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_LIST failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
     try {
       const names = JSON.parse(response.data.toString("utf8")) as string[];
@@ -548,7 +574,11 @@ export class MemoryToolsClient {
     const response = await this.sendCommand(CMD_COLLECTION_ITEM_SET, payload);
 
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_ITEM_SET failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_ITEM_SET failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
     return response.message;
   }
@@ -568,16 +598,19 @@ export class MemoryToolsClient {
     const valuesJSON = JSON.stringify(values);
     const valuesBuffer = writeBytes(Buffer.from(valuesJSON));
 
-    const payload = Buffer.concat([
-      collectionNameBuffer,
-      valuesBuffer,
-    ]);
-    
-    // The command type needs to be updated to match the Go server's new constant.
-    const response = await this.sendCommand(CMD_COLLECTION_ITEM_SET_MANY, payload);
+    const payload = Buffer.concat([collectionNameBuffer, valuesBuffer]);
+
+    const response = await this.sendCommand(
+      CMD_COLLECTION_ITEM_SET_MANY,
+      payload
+    );
 
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_ITEM_SET_MANY failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_ITEM_SET_MANY failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
     return response.message;
   }
@@ -603,7 +636,11 @@ export class MemoryToolsClient {
       return { found: false, message: response.message, value: null };
     }
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_ITEM_GET failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_ITEM_GET failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
 
     try {
@@ -646,10 +683,51 @@ export class MemoryToolsClient {
     );
 
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_ITEM_DELETE failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_ITEM_DELETE failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
     return response.message;
   }
+
+  /**
+   * Deletes multiple items from a collection by their keys.
+   * @param collectionName The name of the collection.
+   * @param keys The array of keys to delete.
+   * @returns A success message from the server.
+   * @throws An error if the operation fails.
+   */
+  async collectionItemDeleteMany(
+    collectionName: string,
+    keys: string[]
+  ): Promise<string> {
+    const collectionNameBuffer = writeString(collectionName);
+    
+    // Write the number of keys.
+    const keysCountBuffer = Buffer.alloc(4);
+    keysCountBuffer.writeUInt32LE(keys.length, 0);
+
+    // Write each key as a length-prefixed string.
+    const keysPayload = keys.map(key => writeString(key));
+    const payload = Buffer.concat([collectionNameBuffer, keysCountBuffer, ...keysPayload]);
+
+    const response = await this.sendCommand(
+      CMD_COLLECTION_ITEM_DELETE_MANY,
+      payload
+    );
+
+    if (response.status !== STATUS_OK) {
+      throw new Error(
+        `COLLECTION_ITEM_DELETE_MANY failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
+    }
+    return response.message;
+  }
+
 
   /**
    * Lists all items (key-value pairs) within a specific collection.
@@ -664,7 +742,11 @@ export class MemoryToolsClient {
     const response = await this.sendCommand(CMD_COLLECTION_ITEM_LIST, payload);
 
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_ITEM_LIST failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_ITEM_LIST failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
 
     const rawMap: { [key: string]: string } = JSON.parse(
@@ -677,15 +759,17 @@ export class MemoryToolsClient {
         // Special handling for _system collection: values are directly JSON objects (sanitized by server)
         // This mirrors the Go client's `isCollectionItemListSystemCmd` logic.
         if (collectionName === "_system" && key.startsWith("user:")) {
-            decodedMap[key] = JSON.parse(rawMap[key]) as T;
+          decodedMap[key] = JSON.parse(rawMap[key]) as T;
         } else {
-            // For all other collections, values are Base64 encoded JSON, as seen in Go client's `readResponse`.
-            const decodedVal = Buffer.from(rawMap[key], "base64");
-            decodedMap[key] = JSON.parse(decodedVal.toString("utf8")) as T;
+          // For all other collections, values are Base64 encoded JSON, as seen in Go client's `readResponse`.
+          const decodedVal = Buffer.from(rawMap[key], "base64");
+          decodedMap[key] = JSON.parse(decodedVal.toString("utf8")) as T;
         }
       } catch (e: any) {
         console.warn(
-          `DBClient: Warning - Failed to decode or parse JSON for key '${key}' in collection item list: ${e.message}. Raw: ${rawMap[key]}`
+          `DBClient: Warning - Failed to decode or parse JSON for key '${key}' in collection item list: ${
+            e.message
+          }. Raw: ${rawMap[key]}`
         );
         decodedMap[key] = rawMap[key] as T; // Fallback to raw string if parsing fails
       }
@@ -700,7 +784,10 @@ export class MemoryToolsClient {
    * @returns The query results as a generic type.
    * @throws An error if the operation fails or query JSON is invalid.
    */
-  async collectionQuery<T = any>(collectionName: string, query: Query): Promise<T> {
+  async collectionQuery<T = any>(
+    collectionName: string,
+    query: Query
+  ): Promise<T> {
     const collectionNameBuffer = writeString(collectionName);
     const queryJSONBuffer = writeBytes(Buffer.from(JSON.stringify(query))); // Query object as JSON bytes
 
@@ -708,7 +795,11 @@ export class MemoryToolsClient {
     const response = await this.sendCommand(CMD_COLLECTION_QUERY, payload);
 
     if (response.status !== STATUS_OK) {
-      throw new Error(`COLLECTION_QUERY failed: ${getStatusString(response.status)}: ${response.message}`);
+      throw new Error(
+        `COLLECTION_QUERY failed: ${getStatusString(
+          response.status
+        )}: ${response.message}`
+      );
     }
 
     try {
@@ -720,10 +811,11 @@ export class MemoryToolsClient {
           e.message
         }. Raw: ${response.data.toString("utf8")}`
       );
-      throw new Error(`COLLECTION_QUERY failed: Invalid JSON format for query results.`);
+      throw new Error(
+        `COLLECTION_QUERY failed: Invalid JSON format for query results.`
+      );
     }
   }
-
 
   /**
    * Returns true if the current client session is authenticated.

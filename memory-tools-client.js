@@ -19,12 +19,13 @@ const CMD_COLLECTION_CREATE = 3;
 const CMD_COLLECTION_DELETE = 4;
 const CMD_COLLECTION_LIST = 5;
 const CMD_COLLECTION_ITEM_SET = 6;
-const CMD_COLLECTION_ITEM_SET_MANY = 7; // NEW: SET_COLLECTION_ITEMS_MANY collectionName, json_array
+const CMD_COLLECTION_ITEM_SET_MANY = 7;
 const CMD_COLLECTION_ITEM_GET = 8;
 const CMD_COLLECTION_ITEM_DELETE = 9;
 const CMD_COLLECTION_ITEM_LIST = 10;
-const CMD_COLLECTION_QUERY = 11; // NEW: QUERY_COLLECTION collectionName, query_json
-const CMD_AUTHENTICATE = 12; // AUTH username, password
+const CMD_COLLECTION_QUERY = 11;
+const CMD_COLLECTION_ITEM_DELETE_MANY = 12;
+const CMD_AUTHENTICATE = 13;
 // RESPONSE STATUS
 const STATUS_OK = 1;
 const STATUS_NOT_FOUND = 2;
@@ -35,13 +36,20 @@ const STATUS_BAD_REQUEST = 6;
 // Helper function to get status string for better error messages
 function getStatusString(status) {
     switch (status) {
-        case STATUS_OK: return "OK";
-        case STATUS_NOT_FOUND: return "NOT_FOUND";
-        case STATUS_ERROR: return "ERROR";
-        case STATUS_BAD_COMMAND: return "BAD_COMMAND";
-        case STATUS_UNAUTHORIZED: return "UNAUTHORIZED";
-        case STATUS_BAD_REQUEST: return "BAD_REQUEST";
-        default: return "UNKNOWN_STATUS";
+        case STATUS_OK:
+            return "OK";
+        case STATUS_NOT_FOUND:
+            return "NOT_FOUND";
+        case STATUS_ERROR:
+            return "ERROR";
+        case STATUS_BAD_COMMAND:
+            return "BAD_COMMAND";
+        case STATUS_UNAUTHORIZED:
+            return "UNAUTHORIZED";
+        case STATUS_BAD_REQUEST:
+            return "BAD_REQUEST";
+        default:
+            return "UNKNOWN_STATUS";
     }
 }
 // Helper: Writes a length-prefixed string (uint32 length + string bytes)
@@ -142,7 +150,7 @@ export class MemoryToolsClient {
                             if (this.host === "localhost" && cert.subjectaltname.includes("DNS:localhost")) {
                                 return undefined;
                             }
-                            const dnsSANs = cert.subjectaltname.split(', ').filter(s => s.startsWith('DNS:')).map(s => s.substring(4));
+                            const dnsSANs = cert.subjectaltname.split(", ").filter((s) => s.startsWith("DNS:")).map((s) => s.substring(4));
                             if (dnsSANs.includes(this.host)) {
                                 return undefined;
                             }
@@ -442,11 +450,7 @@ export class MemoryToolsClient {
             const collectionNameBuffer = writeString(collectionName);
             const valuesJSON = JSON.stringify(values);
             const valuesBuffer = writeBytes(Buffer.from(valuesJSON));
-            const payload = Buffer.concat([
-                collectionNameBuffer,
-                valuesBuffer,
-            ]);
-            // The command type needs to be updated to match the Go server's new constant.
+            const payload = Buffer.concat([collectionNameBuffer, valuesBuffer]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET_MANY, payload);
             if (response.status !== STATUS_OK) {
                 throw new Error(`COLLECTION_ITEM_SET_MANY failed: ${getStatusString(response.status)}: ${response.message}`);
@@ -502,6 +506,29 @@ export class MemoryToolsClient {
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_DELETE, payload);
             if (response.status !== STATUS_OK) {
                 throw new Error(`COLLECTION_ITEM_DELETE failed: ${getStatusString(response.status)}: ${response.message}`);
+            }
+            return response.message;
+        });
+    }
+    /**
+     * Deletes multiple items from a collection by their keys.
+     * @param collectionName The name of the collection.
+     * @param keys The array of keys to delete.
+     * @returns A success message from the server.
+     * @throws An error if the operation fails.
+     */
+    collectionItemDeleteMany(collectionName, keys) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const collectionNameBuffer = writeString(collectionName);
+            // Write the number of keys.
+            const keysCountBuffer = Buffer.alloc(4);
+            keysCountBuffer.writeUInt32LE(keys.length, 0);
+            // Write each key as a length-prefixed string.
+            const keysPayload = keys.map(key => writeString(key));
+            const payload = Buffer.concat([collectionNameBuffer, keysCountBuffer, ...keysPayload]);
+            const response = yield this.sendCommand(CMD_COLLECTION_ITEM_DELETE_MANY, payload);
+            if (response.status !== STATUS_OK) {
+                throw new Error(`COLLECTION_ITEM_DELETE_MANY failed: ${getStatusString(response.status)}: ${response.message}`);
             }
             return response.message;
         });

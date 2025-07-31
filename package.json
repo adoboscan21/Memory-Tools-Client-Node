@@ -1,10 +1,10 @@
 {
   "name": "memory-tools-client",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Memory-Tools client Nodejs library.",
   "main": "memory-tools-client.js",
   "scripts": {
-    "test": "node ./test.js"
+    "test": "node ./test/test.js"
   },
   "repository": {
     "type": "git",
