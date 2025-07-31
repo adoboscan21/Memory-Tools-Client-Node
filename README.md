@@ -19,7 +19,7 @@ npm install memory-tools-client
 The `MemoryToolsClient` class allows you to connect to your MemoryTools server and **authenticate**. Providing user credentials is highly recommended for most operations.
 
 ```javascript
-import MemoryToolsClient from "memory-tools-client";
+import { MemoryToolsClient } from "memory-tools-client";
 import path from "node:path"; // For handling certificate paths
 
 // Your MemoryTools server configuration
@@ -236,11 +236,20 @@ await client.collectionItemSet(
 console.log("Item set in collection 'node_users'.");
 ```
 
+### `collectionItemSetMany<T = any>(collectionName: string, values: T[]): Promise<string>`
+
+Stores multiple items in a collection from an array of objects. Each object should have an `_id` field to be used as the item's key.
+
+- **`collectionName`** (`string`): The name of the collection.
+- **`values`** (`T[]`): An array of objects to store. Each object should have an `_id` field.
+
+**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails.
+
 ```javascript
-await client.collectionItemSetMany(
-  "node_users",
-  [{ name: "Andres", email: "andres@example.com" },{ name: "Alice", email: "alice@example.com" }],
-);
+await client.collectionItemSetMany("node_users", [
+  { _id: "user_a", name: "Andres", email: "andres@example.com" },
+  { _id: "user_b", name: "Alice", email: "alice@example.com" },
+]);
 console.log("Many items set in collection 'node_users'.");
 ```
 
@@ -278,6 +287,20 @@ Deletes an item from a specific collection.
 ```javascript
 await client.collectionItemDelete("node_users", "user_1");
 console.log("Item deleted from 'node_users'.");
+```
+
+### `collectionItemDeleteMany(collectionName: string, keys: string[]): Promise<string>`
+
+Deletes multiple items from a collection by their keys.
+
+- **`collectionName`** (`string`): The name of the collection.
+- **`keys`** (`string[]`): An array of keys to delete.
+
+**Returns**: A `Promise` that resolves with a success message. **Throws**: An `Error` if the operation fails.
+
+```javascript
+await client.collectionItemDeleteMany("node_users", ["user_a", "user_b"]);
+console.log("Items deleted from 'node_users'.");
 ```
 
 ### `collectionItemList<T = any>(collectionName: string): Promise<{ message: string, items: { [key: string]: T } }>`
