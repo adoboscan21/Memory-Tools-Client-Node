@@ -8,6 +8,7 @@ async function runTests() {
     "\n--- Test: Failed Authentication (incorrect user/password) ---"
   );
   let clientBadAuth = null;
+  console.time("Auth_Failed"); // Start timer for failed auth
   try {
     clientBadAuth = new MemoryToolsClient(
       "127.0.0.1",
@@ -26,6 +27,7 @@ async function runTests() {
       `✔ Success: Authentication failed as expected: ${error.message}`
     );
   } finally {
+    console.timeEnd("Auth_Failed"); // End timer for failed auth
     clientBadAuth?.close();
   }
 
@@ -43,7 +45,9 @@ async function runTests() {
     );
 
     console.log("Attempting to connect and authenticate as 'admin'...");
+    console.time("Admin_ConnectAuth"); // Start timer for admin connect/auth
     await clientAdmin.connect();
+    console.timeEnd("Admin_ConnectAuth"); // End timer for admin connect/auth
     console.log(
       `✔ Success: Connected and authenticated as: ${clientAdmin.getAuthenticatedUsername()}`
     );
@@ -59,11 +63,15 @@ async function runTests() {
     const updatedValue = { data: "Node.js main store updated", status: "ok" };
 
     // 1. Set a key-value pair
+    console.time("MainStore_Set_1");
     await clientAdmin.set(testKey, testValue, 60); // TTL of 60 seconds
+    console.timeEnd("MainStore_Set_1");
     console.log(`✔ Success: Key '${testKey}' set in main store.`);
 
     // 2. Get the key-value pair
+    console.time("MainStore_Get_1");
     const retrievedMainItem = await clientAdmin.get(testKey);
+    console.timeEnd("MainStore_Get_1");
     if (
       retrievedMainItem.found &&
       JSON.stringify(retrievedMainItem.value) === JSON.stringify(testValue)
@@ -79,10 +87,14 @@ async function runTests() {
     }
 
     // 3. Update the key-value pair
+    console.time("MainStore_Set_2_Update");
     await clientAdmin.set(testKey, updatedValue); // No TTL, will use default/no expiry
+    console.timeEnd("MainStore_Set_2_Update");
     console.log(`✔ Success: Key '${testKey}' updated in main store.`);
 
+    console.time("MainStore_Get_2_Updated");
     const updatedRetrievedMainItem = await clientAdmin.get(testKey);
+    console.timeEnd("MainStore_Get_2_Updated");
     if (
       updatedRetrievedMainItem.found &&
       JSON.stringify(updatedRetrievedMainItem.value) ===
@@ -99,7 +111,9 @@ async function runTests() {
     }
 
     // 4. Try to get a non-existent key
+    console.time("MainStore_Get_NonExistent");
     const nonExistentItem = await clientAdmin.get("non_existent_key");
+    console.timeEnd("MainStore_Get_NonExistent");
     if (!nonExistentItem.found) {
       console.log(
         `✔ Success: Non-existent key 'non_existent_key' not found as expected.`
@@ -111,8 +125,13 @@ async function runTests() {
     }
 
     // 5. Delete the key-value pair
+    console.time("MainStore_Delete");
     await clientAdmin.set(testKey, null, 0); // Setting to null with 0 TTL effectively deletes it
+    console.timeEnd("MainStore_Delete");
+
+    console.time("MainStore_Get_AfterDelete");
     const deletedItem = await clientAdmin.get(testKey);
+    console.timeEnd("MainStore_Get_AfterDelete");
     if (!deletedItem.found) {
       console.log(`✔ Success: Key '${testKey}' deleted from main store.`);
     } else {
@@ -132,18 +151,24 @@ async function runTests() {
     const itemValue2Updated = { message: "Updated item 2!", version: 2.1 };
 
     // 1. List collections (before creation)
+    console.time("Collection_List_BeforeCreate");
     const collectionsBeforeCreate = await clientAdmin.collectionList();
+    console.timeEnd("Collection_List_BeforeCreate");
     console.log(
       "Available collections (before create):",
       collectionsBeforeCreate.names
     );
 
     // 2. Create a collection
+    console.time("Collection_Create");
     await clientAdmin.collectionCreate(testCollectionName);
+    console.timeEnd("Collection_Create");
     console.log(`✔ Success: Collection '${testCollectionName}' created.`);
 
     // 3. List collections (after creation)
+    console.time("Collection_List_AfterCreate");
     const collectionsAfterCreate = await clientAdmin.collectionList();
+    console.timeEnd("Collection_List_AfterCreate");
     if (collectionsAfterCreate.names.includes(testCollectionName)) {
       console.log(
         `✔ Success: Collection '${testCollectionName}' found in list after creation.`
@@ -155,31 +180,37 @@ async function runTests() {
     }
 
     // 4. Set an item in the collection
+    console.time("CollectionItem_Set_1");
     await clientAdmin.collectionItemSet(
       testCollectionName,
       itemKey1,
       itemValue1
     );
+    console.timeEnd("CollectionItem_Set_1");
     console.log(
       `✔ Success: Item '${itemKey1}' set in '${testCollectionName}'.`
     );
 
     // 5. Set another item in the collection with TTL
+    console.time("CollectionItem_Set_2_TTL");
     await clientAdmin.collectionItemSet(
       testCollectionName,
       itemKey2,
       itemValue2,
       10
     ); // TTL of 10 seconds
+    console.timeEnd("CollectionItem_Set_2_TTL");
     console.log(
       `✔ Success: Item '${itemKey2}' set in '${testCollectionName}' with TTL.`
     );
 
     // 6. Get an item from the collection
+    console.time("CollectionItem_Get_1");
     const retrievedCollectionItem1 = await clientAdmin.collectionItemGet(
       testCollectionName,
       itemKey1
     );
+    console.timeEnd("CollectionItem_Get_1");
     if (
       retrievedCollectionItem1.found &&
       JSON.stringify(retrievedCollectionItem1.value) ===
@@ -196,19 +227,23 @@ async function runTests() {
     }
 
     // 7. Update an item in the collection
+    console.time("CollectionItem_Set_2_Update");
     await clientAdmin.collectionItemSet(
       testCollectionName,
       itemKey2,
       itemValue2Updated
     );
+    console.timeEnd("CollectionItem_Set_2_Update");
     console.log(
       `✔ Success: Item '${itemKey2}' updated in '${testCollectionName}'.`
     );
 
+    console.time("CollectionItem_Get_2_Updated");
     const updatedRetrievedItem2 = await clientAdmin.collectionItemGet(
       testCollectionName,
       itemKey2
     );
+    console.timeEnd("CollectionItem_Get_2_Updated");
     if (
       updatedRetrievedItem2.found &&
       JSON.stringify(updatedRetrievedItem2.value) ===
@@ -225,10 +260,12 @@ async function runTests() {
     }
 
     // 8. Try to get a non-existent item from collection
+    console.time("CollectionItem_Get_NonExistent");
     const nonExistentCollectionItem = await clientAdmin.collectionItemGet(
       testCollectionName,
       "non_existent_item"
     );
+    console.timeEnd("CollectionItem_Get_NonExistent");
     if (!nonExistentCollectionItem.found) {
       console.log(
         `✔ Success: Non-existent item 'non_existent_item' not found as expected in '${testCollectionName}'.`
@@ -240,7 +277,9 @@ async function runTests() {
     }
 
     // 9. List items in the collection
+    console.time("CollectionItem_List");
     const itemsList = await clientAdmin.collectionItemList(testCollectionName);
+    console.timeEnd("CollectionItem_List");
     console.log(
       `✔ Success: Items in '${testCollectionName}':`,
       itemsList.items
@@ -259,106 +298,246 @@ async function runTests() {
       );
     }
 
-    // 10. Test COLLECTION_QUERY
+    // --- Test COLLECTION_QUERY ---
     console.log("\n--- Test: COLLECTION_QUERY ---");
-    const queryCollectionName = "users_collection"; // Assuming you have a collection named 'users_collection' with data
-    // Populate some test data for query if it doesn't exist
-    try {
-      await clientAdmin.collectionCreate(queryCollectionName);
-      await clientAdmin.collectionItemSet(queryCollectionName, "user_alice", {
-        name: "Alice",
-        age: 30,
-        city: "New York",
-      });
-      await clientAdmin.collectionItemSet(queryCollectionName, "user_bob", {
-        name: "Bob",
-        age: 25,
-        city: "London",
-      });
-      await clientAdmin.collectionItemSet(queryCollectionName, "user_charlie", {
-        name: "Charlie",
-        age: 35,
-        city: "New York",
-      });
-      console.log(`Test data populated for query in '${queryCollectionName}'.`);
-    } catch (dataPrepError) {
-      console.warn(
-        `Warning: Could not prepare query test data for '${queryCollectionName}': ${dataPrepError.message}. Assuming data already exists or query will fail.`
-      );
-    }
+    const queryCollectionName = "users";
+
+    // Data preparation (if needed, otherwise ensure 'users' collection is pre-populated)
+    // Removed data population from here to avoid re-creating on every run,
+    // assuming 'users' collection is already set up from previous steps.
 
     try {
-      // Query for users older than 28, ordered by age descending, limit 2
-      const queryResult = await clientAdmin.collectionQuery(
-        queryCollectionName,
-        {
-          filter: { field: "age", op: ">", value: 28 },
-          orderBy: [{ field: "age", direction: "desc" }],
-          limit: 2,
-        }
-      );
+      // Query 1: Users with email in example.com, ordered by name ASC
+      console.time("Query_1_EmailLike");
+      let queryResult = await clientAdmin.collectionQuery(queryCollectionName, {
+        filter: { field: "email", op: "like", value: "%@example.com" },
+        orderBy: [{ field: "name", direction: "asc" }],
+      });
+      console.timeEnd("Query_1_EmailLike");
       console.log(
-        `✔ Success: Query results from '${queryCollectionName}':`,
+        `✔ Success: Query 1 (email like %example.com) results:`,
+        queryResult
+      );
+      const expectedNames1 = [
+        "Adonay",
+        "David Blanco",
+        "Juan Pérez",
+        "María García",
+        "Sofía Ruiz",
+      ];
+      if (
+        queryResult.length === expectedNames1.length &&
+        queryResult.every((u, i) => u.name === expectedNames1[i])
+      ) {
+        console.log("✔ Success: Query 1 result matches expected data and order.");
+      } else {
+        console.log("✖ Error: Query 1 result mismatch.");
+      }
+
+      // Query 2: Users > 25 years old AND (admin OR moderator role)
+      console.time("Query_2_AgeRole");
+      queryResult = await clientAdmin.collectionQuery(queryCollectionName, {
+        filter: {
+          and: [
+            { field: "age", op: ">", value: 25 },
+            {
+              or: [
+                { field: "role", op: "=", value: "admin" },
+                { field: "role", op: "=", value: "moderator" },
+              ],
+            },
+          ],
+        },
+      });
+      console.timeEnd("Query_2_AgeRole");
+      console.log(
+        `✔ Success: Query 2 (age > 25 AND (admin OR moderator)) results:`,
+        queryResult
+      );
+      const expectedNames2 = [
+        "Adonay",
+        "Pedro López",
+        "Sofía Ruiz",
+        "David Blanco",
+      ].sort();
+      const actualNames2 = queryResult.map((u) => u.name).sort();
+      if (
+        actualNames2.length === expectedNames2.length &&
+        actualNames2.every((name, i) => name === expectedNames2[i])
+      ) {
+        console.log("✔ Success: Query 2 result matches expected data.");
+      } else {
+        console.log("✖ Error: Query 2 result mismatch.");
+      }
+
+      // Query 3: Count active users
+      console.time("Query_3_CountActive");
+      const countQueryResult = await clientAdmin.collectionQuery(queryCollectionName, {
+        count: true,
+        filter: { field: "status", op: "=", value: "active" },
+      });
+      console.timeEnd("Query_3_CountActive");
+      console.log(
+        `✔ Success: Query 3 (count active users):`,
+        countQueryResult
+      );
+      if (countQueryResult.count === 8) {
+        console.log("✔ Success: Query 3 count matches expected count.");
+      } else {
+        console.log("✖ Error: Query 3 count mismatch.");
+      }
+
+      // Query 4: 5 most recent users (ordered by created_at DESC)
+      console.time("Query_4_MostRecent");
+      queryResult = await clientAdmin.collectionQuery(queryCollectionName, {
+        orderBy: [{ field: "created_at", direction: "desc" }],
+        limit: 5,
+      });
+      console.timeEnd("Query_4_MostRecent");
+      console.log(
+        `✔ Success: Query 4 (5 most recent users):`,
+        queryResult
+      );
+      const expectedNames4 = [
+        "Carlos Sanz",
+        "Elena Castro",
+        "David Blanco",
+        "Sofía Ruiz",
+        "Luis García",
+      ];
+      if (
+        queryResult.length === expectedNames4.length &&
+        queryResult.every((u, i) => u.name === expectedNames4[i])
+      ) {
+        console.log("✔ Success: Query 4 result matches expected data and order.");
+      } else {
+        console.log("✖ Error: Query 4 result mismatch.");
+      }
+
+      // Query 5: Users named "Juan" or "María"
+      console.time("Query_5_JuanMaria");
+      queryResult = await clientAdmin.collectionQuery(queryCollectionName, {
+        filter: {
+          or: [
+            { field: "name", op: "like", value: "%Juan%" },
+            { field: "name", op: "like", value: "%María%" },
+          ],
+        },
+      });
+      console.timeEnd("Query_5_JuanMaria");
+      console.log(
+        `✔ Success: Query 5 (name like Juan OR María) results:`,
+        queryResult
+      );
+      const expectedNames5 = ["Juan Pérez", "María García"].sort();
+      const actualNames5 = queryResult.map((u) => u.name).sort();
+      if (
+        actualNames5.length === expectedNames5.length &&
+        actualNames5.every((name, i) => name === expectedNames5[i])
+      ) {
+        console.log("✔ Success: Query 5 result matches expected data.");
+      } else {
+        console.log("✖ Error: Query 5 result mismatch.");
+      }
+
+      // Query 6: Average age per city
+      console.time("Query_6_AvgAgePerCity");
+      queryResult = await clientAdmin.collectionQuery(queryCollectionName, {
+        aggregations: { average_age: { func: "avg", field: "age" } },
+        groupBy: ["city"],
+      });
+      console.timeEnd("Query_6_AvgAgePerCity");
+      console.log(
+        `✔ Success: Query 6 (average age per city):`,
         queryResult
       );
       if (
-        queryResult.length === 2 &&
-        queryResult[0].age === 35 &&
-        queryResult[1].age === 30
+        Array.isArray(queryResult) &&
+        queryResult.every(
+          (item) => item.city && typeof item.average_age === "number"
+        )
       ) {
-        console.log("✔ Success: Query result matches expected data and order.");
+        console.log("✔ Success: Query 6 result structure is as expected.");
       } else {
-        console.log(
-          "✖ Error: Query result did not match expected data or order."
-        );
+        console.log("✖ Error: Query 6 result structure mismatch.");
       }
 
-      // Test a count query
-      const countQueryResult = await clientAdmin.collectionQuery(
-        queryCollectionName,
-        {
-          count: true,
-          filter: { field: "city", op: "=", value: "New York" },
-        }
-      );
+      // Query 7: Users between 25 and 35 (inclusive)
+      console.time("Query_7_AgeBetween");
+      queryResult = await clientAdmin.collectionQuery(queryCollectionName, {
+        filter: { field: "age", op: "between", value: [25, 35] },
+      });
+      console.timeEnd("Query_7_AgeBetween");
       console.log(
-        `✔ Success: Count query for 'New York' users in '${queryCollectionName}':`,
-        countQueryResult
+        `✔ Success: Query 7 (age between 25 and 35) results:`,
+        queryResult
       );
-      if (countQueryResult.count === 2) {
-        console.log("✔ Success: Count query result matches expected count.");
+      const expectedNames7 = [
+        "Adonay",
+        "Juan Pérez",
+        "María García",
+        "Ana Díaz",
+        "Sofía Ruiz",
+        "Elena Castro",
+      ].sort();
+      const actualNames7 = queryResult.map((u) => u.name).sort();
+      if (
+        actualNames7.length === expectedNames7.length &&
+        actualNames7.every((name, i) => name === expectedNames7[i])
+      ) {
+        console.log("✔ Success: Query 7 result matches expected data.");
       } else {
-        console.log(
-          "✖ Error: Count query result did not match expected count."
-        );
+        console.log("✖ Error: Query 7 result mismatch.");
+      }
+
+      // Query 8: Distinct cities
+      console.time("Query_8_DistinctCities");
+      queryResult = await clientAdmin.collectionQuery(queryCollectionName, {
+        distinct: "city",
+      });
+      console.timeEnd("Query_8_DistinctCities");
+      console.log(`✔ Success: Query 8 (distinct cities):`, queryResult);
+      const expectedCities = [
+        "Madrid",
+        "Barcelona",
+        "Valencia",
+        "Sevilla",
+        "Bilbao",
+      ].sort();
+      const actualCities = queryResult.sort();
+      if (
+        actualCities.length === expectedCities.length &&
+        actualCities.every((city, i) => city === expectedCities[i])
+      ) {
+        console.log("✔ Success: Query 8 result matches expected distinct cities.");
+      } else {
+        console.log("✖ Error: Query 8 result mismatch.");
       }
     } catch (queryError) {
       console.error(
         `✖ Error: Failed to perform collectionQuery on '${queryCollectionName}': ${queryError.message}`
       );
     } finally {
-      // Clean up query test data
-      try {
-        await clientAdmin.collectionDelete(queryCollectionName);
-        console.log(
-          `✔ Success: Cleaned up query test collection '${queryCollectionName}'.`
-        );
-      } catch (cleanupError) {
-        console.warn(
-          `Warning: Failed to clean up query test collection '${queryCollectionName}': ${cleanupError.message}`
-        );
-      }
+      // Clean up the dynamically created collection for query tests IF it was created here.
+      // If you are using your persistent 'users' collection, you might want to remove this block
+      // or implement selective cleanup.
+      // For this example, I'll keep the cleanup only for 'my_nodejs_data' from earlier tests.
     }
 
-    // 11. Delete an item
+
+    // 10. Delete an item
+    console.time("CollectionItem_Delete");
     await clientAdmin.collectionItemDelete(testCollectionName, itemKey1);
+    console.timeEnd("CollectionItem_Delete");
     console.log(
       `✔ Success: Item '${itemKey1}' deleted from '${testCollectionName}'.`
     );
 
+    console.time("CollectionItem_List_AfterDelete");
     const remainingItems = await clientAdmin.collectionItemList(
       testCollectionName
     );
+    console.timeEnd("CollectionItem_List_AfterDelete");
     if (
       Object.keys(remainingItems.items).length === 1 &&
       remainingItems.items[itemKey2]
@@ -372,12 +551,16 @@ async function runTests() {
       );
     }
 
-    // 12. Delete the test collection
+    // 11. Delete the test collection
+    console.time("Collection_Delete");
     await clientAdmin.collectionDelete(testCollectionName);
+    console.timeEnd("Collection_Delete");
     console.log(`✔ Success: Collection '${testCollectionName}' deleted.`);
 
-    // 13. List collections (after deletion)
+    // 12. List collections (after deletion)
+    console.time("Collection_List_AfterDelete");
     const collectionsAfterDelete = await clientAdmin.collectionList();
+    console.timeEnd("Collection_List_AfterDelete");
     if (!collectionsAfterDelete.names.includes(testCollectionName)) {
       console.log(
         `✔ Success: Collection '${testCollectionName}' not found in list after deletion.`
