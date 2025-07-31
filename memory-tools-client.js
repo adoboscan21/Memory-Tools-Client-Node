@@ -19,11 +19,12 @@ const CMD_COLLECTION_CREATE = 3;
 const CMD_COLLECTION_DELETE = 4;
 const CMD_COLLECTION_LIST = 5;
 const CMD_COLLECTION_ITEM_SET = 6;
-const CMD_COLLECTION_ITEM_GET = 7;
-const CMD_COLLECTION_ITEM_DELETE = 8;
-const CMD_COLLECTION_ITEM_LIST = 9;
-const CMD_COLLECTION_QUERY = 10; // NEW: QUERY_COLLECTION collectionName, query_json
-const CMD_AUTHENTICATE = 11; // AUTH username, password
+const CMD_COLLECTION_ITEM_SET_MANY = 7; // NEW: SET_COLLECTION_ITEMS_MANY collectionName, json_array
+const CMD_COLLECTION_ITEM_GET = 8;
+const CMD_COLLECTION_ITEM_DELETE = 9;
+const CMD_COLLECTION_ITEM_LIST = 10;
+const CMD_COLLECTION_QUERY = 11; // NEW: QUERY_COLLECTION collectionName, query_json
+const CMD_AUTHENTICATE = 12; // AUTH username, password
 // RESPONSE STATUS
 const STATUS_OK = 1;
 const STATUS_NOT_FOUND = 2;
@@ -425,6 +426,30 @@ export class MemoryToolsClient {
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET, payload);
             if (response.status !== STATUS_OK) {
                 throw new Error(`COLLECTION_ITEM_SET failed: ${getStatusString(response.status)}: ${response.message}`);
+            }
+            return response.message;
+        });
+    }
+    /**
+     * Sets multiple items in a collection from a JSON array.
+     * @param collectionName The name of the collection.
+     * @param values The array of objects to store.
+     * @returns A success message from the server.
+     * @throws An error if the operation fails.
+     */
+    collectionItemSetMany(collectionName, values) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const collectionNameBuffer = writeString(collectionName);
+            const valuesJSON = JSON.stringify(values);
+            const valuesBuffer = writeBytes(Buffer.from(valuesJSON));
+            const payload = Buffer.concat([
+                collectionNameBuffer,
+                valuesBuffer,
+            ]);
+            // The command type needs to be updated to match the Go server's new constant.
+            const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET_MANY, payload);
+            if (response.status !== STATUS_OK) {
+                throw new Error(`COLLECTION_ITEM_SET_MANY failed: ${getStatusString(response.status)}: ${response.message}`);
             }
             return response.message;
         });
