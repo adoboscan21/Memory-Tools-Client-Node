@@ -12,7 +12,7 @@ async function runTests() {
     try {
         clientBadAuth = new MemoryToolsClient(
             "127.0.0.1",
-            8080,
+            3443,
             "nonexistent_user",
             "wrongpassword",
             null,
@@ -37,7 +37,7 @@ async function runTests() {
     try {
         clientRoot = new MemoryToolsClient(
             "127.0.0.1",
-            8080,
+            3443,
             "root",
             "rootpass",
             null,
@@ -66,7 +66,7 @@ async function runTests() {
     try {
         clientAdmin = new MemoryToolsClient(
             "127.0.0.1",
-            8080,
+            3443,
             "admin",
             "adminpass",
             null,
