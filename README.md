@@ -24,7 +24,7 @@ import path from "node:path"; // For handling certificate paths
 
 // Your MemoryTools server configuration
 const DB_HOST = "127.0.0.1";
-const DB_PORT = 3443;
+const DB_PORT = 5876;
 const DB_USER = "myuser"; // Your username!
 const DB_PASS = "mypassword"; // Your password!
 
