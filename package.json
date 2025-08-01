@@ -1,6 +1,6 @@
 {
   "name": "memory-tools-client",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Memory-Tools client Nodejs library.",
   "main": "memory-tools-client.js",
   "scripts": {
