@@ -1,6 +1,6 @@
 {
   "name": "memory-tools-client",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Memory-Tools client Nodejs library.",
   "main": "memory-tools-client.js",
   "scripts": {
@@ -29,7 +29,6 @@
     "@types/node": "^24.1.0"
   },
   "dependencies": {
-    "redis": "^5.6.1",
     "typescript": "^5.8.3"
   }
 }
