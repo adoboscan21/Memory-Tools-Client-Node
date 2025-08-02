@@ -8,24 +8,26 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 import tls from "node:tls";
-import net from "node:net";
 import fs from "node:fs";
 import { Buffer } from "node:buffer";
 // --- Protocol Constants (must match internal/protocol/protocol.go) ---
-// COMMAND TYPES
+// COMMAND TYPES - Corrected to match Go's iota values
 const CMD_SET = 1;
 const CMD_GET = 2;
 const CMD_COLLECTION_CREATE = 3;
 const CMD_COLLECTION_DELETE = 4;
 const CMD_COLLECTION_LIST = 5;
-const CMD_COLLECTION_ITEM_SET = 6;
-const CMD_COLLECTION_ITEM_SET_MANY = 7;
-const CMD_COLLECTION_ITEM_GET = 8;
-const CMD_COLLECTION_ITEM_DELETE = 9;
-const CMD_COLLECTION_ITEM_LIST = 10;
-const CMD_COLLECTION_QUERY = 11;
-const CMD_COLLECTION_ITEM_DELETE_MANY = 12;
-const CMD_AUTHENTICATE = 13;
+const CMD_COLLECTION_INDEX_CREATE = 6;
+const CMD_COLLECTION_INDEX_DELETE = 7;
+const CMD_COLLECTION_INDEX_LIST = 8;
+const CMD_COLLECTION_ITEM_SET = 9;
+const CMD_COLLECTION_ITEM_SET_MANY = 10;
+const CMD_COLLECTION_ITEM_GET = 11;
+const CMD_COLLECTION_ITEM_DELETE = 12;
+const CMD_COLLECTION_ITEM_LIST = 13;
+const CMD_COLLECTION_QUERY = 14;
+const CMD_COLLECTION_ITEM_DELETE_MANY = 15;
+const CMD_AUTHENTICATE = 16;
 // RESPONSE STATUS
 const STATUS_OK = 1;
 const STATUS_NOT_FOUND = 2;
@@ -52,16 +54,16 @@ function getStatusString(status) {
             return "UNKNOWN_STATUS";
     }
 }
-// Helper: Writes a length-prefixed string (uint32 length + string bytes)
+// Helper: Writes a length-prefixed string (uint32 LE length + string bytes)
 function writeString(str) {
     const lenBuffer = Buffer.alloc(4);
-    lenBuffer.writeUInt32LE(Buffer.byteLength(str, "utf8"), 0); // Use Little Endian (LE) matching Go's binary.LittleEndian
+    lenBuffer.writeUInt32LE(Buffer.byteLength(str, "utf8"), 0);
     return Buffer.concat([lenBuffer, Buffer.from(str, "utf8")]);
 }
-// Helper: Writes a length-prefixed byte array (uint32 length + byte array)
+// Helper: Writes a length-prefixed byte array (uint32 LE length + byte array)
 function writeBytes(bytes) {
     const lenBuffer = Buffer.alloc(4);
-    lenBuffer.writeUInt32LE(bytes.length, 0); // Use Little Endian (LE) matching Go's binary.LittleEndian
+    lenBuffer.writeUInt32LE(bytes.length, 0);
     return Buffer.concat([lenBuffer, bytes]);
 }
 // Helper to read N bytes from the socket, handling partial reads
@@ -79,7 +81,7 @@ function readNBytes(socket, n) {
             if (bytesRead >= n) {
                 socket.removeListener("data", onData);
                 socket.removeListener("error", onError);
-                resolve(buffer.slice(0, n)); // Resolve with exactly N bytes
+                resolve(buffer);
             }
         };
         const onError = (err) => {
@@ -106,91 +108,56 @@ export class MemoryToolsClient {
         this.authenticatedUser = null;
     }
     /**
-     * Establishes a TLS connection to the database server and performs authentication.
-     * If username and password are provided in the constructor, it will attempt to log in automatically.
-     * @returns The TLS socket if connection and authentication are successful.
-     * @throws An error if connection or authentication fails.
+     * Establishes a TLS connection and authenticates.
      */
     connect() {
         return __awaiter(this, void 0, void 0, function* () {
-            // If already connected and authenticated, just return the socket.
             if (this.socket && !this.socket.destroyed && this.isAuthenticatedSession) {
-                console.log("DBClient: Already connected and authenticated.");
                 return this.socket;
             }
-            // If a connection attempt is already in progress, return that promise.
             if (this.connectingPromise) {
                 return this.connectingPromise;
             }
-            // Start a new connection attempt.
             this.connectingPromise = new Promise((resolve, reject) => __awaiter(this, void 0, void 0, function* () {
-                let serverCert = undefined;
-                if (this.serverCertPath) {
-                    try {
-                        serverCert = fs.readFileSync(this.serverCertPath);
-                    }
-                    catch (err) {
-                        this.connectingPromise = null; // Reset promise on error
-                        return reject(new Error(`DBClient: Failed to read server certificate file: ${err.message}`));
-                    }
-                }
                 const options = {
                     host: this.host,
                     port: this.port,
-                    ca: serverCert ? [serverCert] : undefined,
                     rejectUnauthorized: this.rejectUnauthorized,
-                    checkServerIdentity: (host, cert) => {
-                        if (cert.subject && cert.subject.CN === this.host) {
-                            return undefined;
-                        }
-                        if (cert.subjectaltname) {
-                            if (net.isIP(this.host) && cert.subjectaltname.includes(`IP:${this.host}`)) {
-                                return undefined;
-                            }
-                            if (this.host === "localhost" && cert.subjectaltname.includes("DNS:localhost")) {
-                                return undefined;
-                            }
-                            const dnsSANs = cert.subjectaltname.split(", ").filter((s) => s.startsWith("DNS:")).map((s) => s.substring(4));
-                            if (dnsSANs.includes(this.host)) {
-                                return undefined;
-                            }
-                        }
-                        console.warn(`DBClient: WARNING - Server certificate identity check failed for host ${this.host}. CN: ${cert.subject ? cert.subject.CN : "N/A"}, SANs: ${cert.subjectaltname || "N/A"}. Proceeding if rejectUnauthorized is false.`);
-                        return undefined; // Returning undefined means the check "passed" (or was ignored if rejectUnauthorized is false)
-                    },
                 };
+                if (this.serverCertPath) {
+                    try {
+                        options.ca = [fs.readFileSync(this.serverCertPath)];
+                    }
+                    catch (err) {
+                        this.connectingPromise = null;
+                        return reject(new Error(`Failed to read server certificate: ${err.message}`));
+                    }
+                }
                 this.socket = tls.connect(options, () => __awaiter(this, void 0, void 0, function* () {
                     var _a, _b;
-                    if (this.socket.authorized || !this.rejectUnauthorized) {
-                        console.log(`DBClient: Connected securely to ${this.host}:${this.port}`);
-                        if (this.username && this.password) {
-                            try {
-                                // This calls performAuthentication, which sends CMD_AUTHENTICATE.
-                                yield this.performAuthentication(this.username, this.password);
-                                resolve(this.socket); // Resolve the 'connect' promise ONLY AFTER successful authentication.
-                            }
-                            catch (authErr) {
-                                (_a = this.socket) === null || _a === void 0 ? void 0 : _a.destroy(); // Close socket on authentication failure
-                                this.connectingPromise = null; // Reset promise
-                                reject(authErr); // Reject the 'connect' promise with the authentication error
-                            }
+                    if (!this.socket.authorized && this.rejectUnauthorized) {
+                        const authError = this.socket.authorizationError;
+                        (_a = this.socket) === null || _a === void 0 ? void 0 : _a.destroy();
+                        this.connectingPromise = null;
+                        return reject(new Error(`TLS connection unauthorized: ${authError}`));
+                    }
+                    if (this.username && this.password) {
+                        try {
+                            yield this.performAuthentication(this.username, this.password);
+                            resolve(this.socket);
                         }
-                        else {
-                            console.warn("DBClient: Connected without credentials. Operations might be unauthorized.");
-                            this.connectingPromise = null; // Reset promise
-                            resolve(this.socket); // Resolve if no credentials provided (but server might deny commands)
+                        catch (authErr) {
+                            (_b = this.socket) === null || _b === void 0 ? void 0 : _b.destroy();
+                            this.connectingPromise = null;
+                            reject(authErr);
                         }
                     }
                     else {
-                        const authError = this.socket.authorizationError;
-                        console.error(`DBClient: TLS connection unauthorized: ${authError}`);
-                        (_b = this.socket) === null || _b === void 0 ? void 0 : _b.destroy();
-                        this.connectingPromise = null;
-                        reject(new Error(`DBClient: TLS connection unauthorized: ${authError}`));
+                        this.isAuthenticatedSession = false; // Not authenticated if no credentials are provided
+                        resolve(this.socket);
                     }
                 }));
                 this.socket.on("error", (err) => {
-                    console.error(`DBClient: Socket error: ${err.message}`);
                     this.socket = null;
                     this.connectingPromise = null;
                     this.isAuthenticatedSession = false;
@@ -198,7 +165,6 @@ export class MemoryToolsClient {
                     reject(err);
                 });
                 this.socket.on("close", () => {
-                    console.log("DBClient: Socket connection closed.");
                     this.socket = null;
                     this.connectingPromise = null;
                     this.isAuthenticatedSession = false;
@@ -208,85 +174,10 @@ export class MemoryToolsClient {
             return this.connectingPromise;
         });
     }
-    /**
-     * Internal method to perform the authentication command.
-     * This method sends the CMD_AUTHENTICATE command and processes its response.
-     * @param username The username.
-     * @param password The password.
-     * @returns A success message if authentication is successful.
-     * @throws An error if authentication fails.
-     */
-    performAuthentication(username, password) {
+    readFullResponse() {
         return __awaiter(this, void 0, void 0, function* () {
-            // Ensure socket is available before sending auth command
-            if (!this.socket || this.socket.destroyed) {
-                throw new Error("DBClient: Cannot perform authentication, socket is not connected.");
-            }
-            const usernameBuffer = writeString(username);
-            const passwordBuffer = writeString(password);
-            const payload = Buffer.concat([usernameBuffer, passwordBuffer]);
-            const commandBuffer = Buffer.concat([
-                Buffer.from([CMD_AUTHENTICATE]), // Explicitly send CMD_AUTHENTICATE
-                payload,
-            ]);
-            // Log the command buffer for debugging
-            // console.log("DBClient: Sending AUTH command. First byte (CMD_AUTHENTICATE):", commandBuffer[0]);
-            // console.log("DBClient: Full AUTH command buffer (hex):", commandBuffer.toString('hex'));
-            this.socket.write(commandBuffer);
-            // Read response (status, message, data)
-            const statusByte = yield readNBytes(this.socket, 1);
-            const status = statusByte.readUInt8(0);
-            const msgLenBuffer = yield readNBytes(this.socket, 4);
-            const msgLen = msgLenBuffer.readUInt32LE(0); // Little Endian
-            const msgBuffer = yield readNBytes(this.socket, msgLen);
-            const message = msgBuffer.toString("utf8");
-            const dataLenBuffer = yield readNBytes(this.socket, 4);
-            const dataLen = dataLenBuffer.readUInt32LE(0); // Little Endian
-            let dataBuffer = Buffer.alloc(0);
-            if (dataLen > 0) {
-                dataBuffer = yield readNBytes(this.socket, dataLen);
-            }
-            // Process authentication response
-            if (status === STATUS_OK) {
-                this.isAuthenticatedSession = true;
-                this.authenticatedUser = username;
-                console.log(`DBClient: Authentication successful for user '${username}'.`);
-                return message;
-            }
-            else {
-                this.isAuthenticatedSession = false;
-                this.authenticatedUser = null;
-                // Provide more specific error for unauthorized authentication attempts
-                const errorMessage = status === STATUS_UNAUTHORIZED
-                    ? `Authentication failed: ${message}` // Server specific unauthorized message
-                    : `Authentication failed with status ${getStatusString(status)} (${status}): ${message}`;
-                throw new Error(errorMessage);
-            }
-        });
-    }
-    /**
-     * Sends a command and reads its response from the server.
-     * Requires the client to be connected and authenticated (unless it's CMD_AUTHENTICATE).
-     */
-    sendCommand(commandType, payloadBuffer) {
-        return __awaiter(this, void 0, void 0, function* () {
-            // Ensure the socket is connected
-            if (!this.socket || this.socket.destroyed) {
-                throw new Error("DBClient: Not connected. Call connect() first.");
-            }
-            // Ensure the session is authenticated for any command other than CMD_AUTHENTICATE
-            if (commandType !== CMD_AUTHENTICATE && !this.isAuthenticatedSession) {
-                throw new Error("DBClient: Not authenticated. Call connect() with credentials to authenticate.");
-            }
-            const commandBuffer = Buffer.concat([
-                Buffer.from([commandType]),
-                payloadBuffer,
-            ]);
-            // Log the command buffer for debugging
-            // console.log(`DBClient: Sending command ${commandType}. First byte:`, commandBuffer[0]);
-            // console.log(`DBClient: Full command buffer for ${commandType} (hex):`, commandBuffer.toString('hex'));
-            this.socket.write(commandBuffer);
-            // Read response (status, message, data)
+            if (!this.socket)
+                throw new Error("Socket is not available.");
             const statusByte = yield readNBytes(this.socket, 1);
             const status = statusByte.readUInt8(0);
             const msgLenBuffer = yield readNBytes(this.socket, 4);
@@ -295,326 +186,247 @@ export class MemoryToolsClient {
             const message = msgBuffer.toString("utf8");
             const dataLenBuffer = yield readNBytes(this.socket, 4);
             const dataLen = dataLenBuffer.readUInt32LE(0);
-            let dataBuffer = Buffer.alloc(0);
-            if (dataLen > 0) {
-                dataBuffer = yield readNBytes(this.socket, dataLen);
-            }
+            const dataBuffer = yield readNBytes(this.socket, dataLen);
             return { status, message, data: dataBuffer };
         });
     }
+    performAuthentication(username, password) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!this.socket || this.socket.destroyed) {
+                throw new Error("Cannot authenticate, socket is not connected.");
+            }
+            const payload = Buffer.concat([writeString(username), writeString(password)]);
+            const commandBuffer = Buffer.concat([Buffer.from([CMD_AUTHENTICATE]), payload]);
+            this.socket.write(commandBuffer);
+            const { status, message } = yield this.readFullResponse();
+            if (status === STATUS_OK) {
+                this.isAuthenticatedSession = true;
+                this.authenticatedUser = username;
+                return message;
+            }
+            else {
+                this.isAuthenticatedSession = false;
+                this.authenticatedUser = null;
+                throw new Error(`Authentication failed: ${getStatusString(status)}: ${message}`);
+            }
+        });
+    }
+    sendCommand(commandType, payloadBuffer) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!this.socket || this.socket.destroyed) {
+                throw new Error("Not connected. Call connect() first.");
+            }
+            if (commandType !== CMD_AUTHENTICATE && !this.isAuthenticatedSession) {
+                throw new Error("Not authenticated. Connect with credentials first.");
+            }
+            const commandBuffer = Buffer.concat([Buffer.from([commandType]), payloadBuffer]);
+            this.socket.write(commandBuffer);
+            return this.readFullResponse();
+        });
+    }
     // --- Public API Methods ---
-    /**
-     * Sets a key-value pair in the main store.
-     * @param key The key to set.
-     * @param value The value to store (will be JSON.stringified).
-     * @param ttlSeconds Optional time-to-live in seconds (0 for no expiry).
-     * @returns A success message from the server.
-     * @throws An error if the operation fails.
-     */
     set(key_1, value_1) {
         return __awaiter(this, arguments, void 0, function* (key, value, ttlSeconds = 0) {
-            const keyBuffer = writeString(key);
-            const valueBuffer = writeBytes(Buffer.from(JSON.stringify(value))); // Value is JSON stringified
+            // FIX: Create buffer first, then write to it.
             const ttlBuffer = Buffer.alloc(8);
-            ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0); // int64 in Go is BigInt in JS
-            const payload = Buffer.concat([keyBuffer, valueBuffer, ttlBuffer]);
+            ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0);
+            const payload = Buffer.concat([
+                writeString(key),
+                writeBytes(Buffer.from(JSON.stringify(value))),
+                ttlBuffer, // Pass the buffer variable
+            ]);
             const response = yield this.sendCommand(CMD_SET, payload);
-            if (response.status !== STATUS_OK) {
+            if (response.status !== STATUS_OK)
                 throw new Error(`SET failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
             return response.message;
         });
     }
-    /**
-     * Retrieves a value from the main store by key.
-     * @param key The key to retrieve.
-     * @returns A GetResult object indicating if found, message, and the parsed value.
-     * @throws An error if the operation fails or value cannot be parsed.
-     */
     get(key) {
         return __awaiter(this, void 0, void 0, function* () {
-            const keyBuffer = writeString(key);
-            const payload = keyBuffer; // GET command only needs the key
-            const response = yield this.sendCommand(CMD_GET, payload);
-            if (response.status === STATUS_NOT_FOUND) {
+            const response = yield this.sendCommand(CMD_GET, writeString(key));
+            if (response.status === STATUS_NOT_FOUND)
                 return { found: false, message: response.message, value: null };
-            }
-            if (response.status !== STATUS_OK) {
+            if (response.status !== STATUS_OK)
                 throw new Error(`GET failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
             try {
-                return {
-                    found: true,
-                    message: response.message,
-                    value: JSON.parse(response.data.toString("utf8")),
-                };
+                return { found: true, message: response.message, value: JSON.parse(response.data.toString("utf8")) };
             }
             catch (e) {
-                console.error(`DBClient: Error parsing GET value as JSON: ${e.message}. Raw: ${response.data.toString("utf8")}`);
-                throw new Error(`GET failed: Invalid JSON format for stored value.`);
+                throw new Error("GET failed: Invalid JSON in stored value.");
             }
         });
     }
-    /**
-     * Ensures a collection exists (creates it if it doesn't).
-     * @param collectionName The name of the collection.
-     * @returns A success message from the server.
-     * @throws An error if the operation fails (e.g., unauthorized to create _system).
-     */
     collectionCreate(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = writeString(collectionName);
-            const response = yield this.sendCommand(CMD_COLLECTION_CREATE, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_CREATE failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            const response = yield this.sendCommand(CMD_COLLECTION_CREATE, writeString(collectionName));
+            if (response.status !== STATUS_OK)
+                throw new Error(`Collection Create failed: ${getStatusString(response.status)}: ${response.message}`);
             return response.message;
         });
     }
-    /**
-     * Deletes a collection entirely.
-     * @param collectionName The name of the collection to delete.
-     * @returns A success message from the server.
-     * @throws An error if the operation fails (e.g., unauthorized to delete _system).
-     */
     collectionDelete(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = writeString(collectionName);
-            const response = yield this.sendCommand(CMD_COLLECTION_DELETE, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_DELETE failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            const response = yield this.sendCommand(CMD_COLLECTION_DELETE, writeString(collectionName));
+            if (response.status !== STATUS_OK)
+                throw new Error(`Collection Delete failed: ${getStatusString(response.status)}: ${response.message}`);
             return response.message;
         });
     }
-    /**
-     * Lists all available collection names.
-     * @returns A CollectionListResult object containing the message and an array of collection names.
-     * @throws An error if the operation fails.
-     */
     collectionList() {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.alloc(0); // LIST_COLLECTIONS command has no payload
-            const response = yield this.sendCommand(CMD_COLLECTION_LIST, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_LIST failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            const response = yield this.sendCommand(CMD_COLLECTION_LIST, Buffer.alloc(0));
+            if (response.status !== STATUS_OK)
+                throw new Error(`Collection List failed: ${getStatusString(response.status)}: ${response.message}`);
             try {
-                const names = JSON.parse(response.data.toString("utf8"));
-                return { message: response.message, names: names };
+                return { message: response.message, names: JSON.parse(response.data.toString("utf8")) };
             }
             catch (e) {
-                console.error(`DBClient: Error parsing COLLECTION_LIST response as JSON: ${e.message}. Raw: ${response.data.toString("utf8")}`);
-                throw new Error(`COLLECTION_LIST failed: Invalid JSON format for collection names.`);
+                throw new Error("Collection List failed: Invalid JSON response.");
             }
         });
     }
-    /**
-     * Sets an item (key-value pair) within a specific collection.
-     * @param collectionName The name of the collection.
-     * @param key The key of the item.
-     * @param value The value to store (will be JSON.stringified).
-     * @param ttlSeconds Optional time-to-live in seconds (0 for no expiry).
-     * @returns A success message from the server.
-     * @throws An error if the operation fails.
-     */
+    collectionIndexCreate(collectionName, fieldName) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const payload = Buffer.concat([writeString(collectionName), writeString(fieldName)]);
+            const response = yield this.sendCommand(CMD_COLLECTION_INDEX_CREATE, payload);
+            if (response.status !== STATUS_OK)
+                throw new Error(`Index Create failed: ${getStatusString(response.status)}: ${response.message}`);
+            return response.message;
+        });
+    }
+    collectionIndexDelete(collectionName, fieldName) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const payload = Buffer.concat([writeString(collectionName), writeString(fieldName)]);
+            const response = yield this.sendCommand(CMD_COLLECTION_INDEX_DELETE, payload);
+            if (response.status !== STATUS_OK)
+                throw new Error(`Index Delete failed: ${getStatusString(response.status)}: ${response.message}`);
+            return response.message;
+        });
+    }
+    collectionIndexList(collectionName) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const response = yield this.sendCommand(CMD_COLLECTION_INDEX_LIST, writeString(collectionName));
+            if (response.status !== STATUS_OK)
+                throw new Error(`Index List failed: ${getStatusString(response.status)}: ${response.message}`);
+            try {
+                return JSON.parse(response.data.toString("utf8"));
+            }
+            catch (e) {
+                throw new Error("Index List failed: Invalid JSON response.");
+            }
+        });
+    }
     collectionItemSet(collectionName_1, key_1, value_1) {
         return __awaiter(this, arguments, void 0, function* (collectionName, key, value, ttlSeconds = 0) {
-            const collectionNameBuffer = writeString(collectionName);
-            const keyBuffer = writeString(key);
-            const valueBuffer = writeBytes(Buffer.from(JSON.stringify(value))); // Value is JSON stringified
+            // FIX: Create buffer first, then write to it.
             const ttlBuffer = Buffer.alloc(8);
-            ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0); // int64 in Go is BigInt in JS
+            ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0);
             const payload = Buffer.concat([
-                collectionNameBuffer,
-                keyBuffer,
-                valueBuffer,
-                ttlBuffer,
+                writeString(collectionName),
+                writeString(key),
+                writeBytes(Buffer.from(JSON.stringify(value))),
+                ttlBuffer, // Pass the buffer variable
             ]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_ITEM_SET failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            if (response.status !== STATUS_OK)
+                throw new Error(`Item Set failed: ${getStatusString(response.status)}: ${response.message}`);
             return response.message;
         });
     }
-    /**
-     * Sets multiple items in a collection from a JSON array.
-     * @param collectionName The name of the collection.
-     * @param values The array of objects to store.
-     * @returns A success message from the server.
-     * @throws An error if the operation fails.
-     */
     collectionItemSetMany(collectionName, values) {
         return __awaiter(this, void 0, void 0, function* () {
-            const collectionNameBuffer = writeString(collectionName);
-            const valuesJSON = JSON.stringify(values);
-            const valuesBuffer = writeBytes(Buffer.from(valuesJSON));
-            const payload = Buffer.concat([collectionNameBuffer, valuesBuffer]);
+            const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(values)))]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET_MANY, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_ITEM_SET_MANY failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            if (response.status !== STATUS_OK)
+                throw new Error(`Item Set Many failed: ${getStatusString(response.status)}: ${response.message}`);
             return response.message;
         });
     }
-    /**
-     * Retrieves an item from a specific collection by key.
-     * @param collectionName The name of the collection.
-     * @param key The key of the item.
-     * @returns A GetResult object indicating if found, message, and the parsed value.
-     * @throws An error if the operation fails or value cannot be parsed.
-     */
     collectionItemGet(collectionName, key) {
         return __awaiter(this, void 0, void 0, function* () {
-            const collectionNameBuffer = writeString(collectionName);
-            const keyBuffer = writeString(key);
-            const payload = Buffer.concat([collectionNameBuffer, keyBuffer]);
+            const payload = Buffer.concat([writeString(collectionName), writeString(key)]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_GET, payload);
-            if (response.status === STATUS_NOT_FOUND) {
+            if (response.status === STATUS_NOT_FOUND)
                 return { found: false, message: response.message, value: null };
-            }
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_ITEM_GET failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            if (response.status !== STATUS_OK)
+                throw new Error(`Item Get failed: ${getStatusString(response.status)}: ${response.message}`);
             try {
-                // For single GETs, data is raw JSON bytes.
-                return {
-                    found: true,
-                    message: response.message,
-                    value: JSON.parse(response.data.toString("utf8")),
-                };
+                return { found: true, message: response.message, value: JSON.parse(response.data.toString("utf8")) };
             }
             catch (e) {
-                console.error(`DBClient: Error parsing COLLECTION_ITEM_GET value as JSON: ${e.message}. Raw: ${response.data.toString("utf8")}`);
-                throw new Error(`COLLECTION_ITEM_GET failed: Invalid JSON format for stored value.`);
+                throw new Error("Item Get failed: Invalid JSON in stored value.");
             }
         });
     }
-    /**
-     * Deletes an item from a specific collection by key.
-     * @param collectionName The name of the collection.
-     * @param key The key of the item to delete.
-     * @returns A success message from the server.
-     * @throws An error if the operation fails.
-     */
     collectionItemDelete(collectionName, key) {
         return __awaiter(this, void 0, void 0, function* () {
-            const collectionNameBuffer = writeString(collectionName);
-            const keyBuffer = writeString(key);
-            const payload = Buffer.concat([collectionNameBuffer, keyBuffer]);
+            const payload = Buffer.concat([writeString(collectionName), writeString(key)]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_DELETE, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_ITEM_DELETE failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            if (response.status !== STATUS_OK)
+                throw new Error(`Item Delete failed: ${getStatusString(response.status)}: ${response.message}`);
             return response.message;
         });
     }
-    /**
-     * Deletes multiple items from a collection by their keys.
-     * @param collectionName The name of the collection.
-     * @param keys The array of keys to delete.
-     * @returns A success message from the server.
-     * @throws An error if the operation fails.
-     */
     collectionItemDeleteMany(collectionName, keys) {
         return __awaiter(this, void 0, void 0, function* () {
-            const collectionNameBuffer = writeString(collectionName);
-            // Write the number of keys.
             const keysCountBuffer = Buffer.alloc(4);
             keysCountBuffer.writeUInt32LE(keys.length, 0);
-            // Write each key as a length-prefixed string.
             const keysPayload = keys.map(key => writeString(key));
-            const payload = Buffer.concat([collectionNameBuffer, keysCountBuffer, ...keysPayload]);
+            const payload = Buffer.concat([writeString(collectionName), keysCountBuffer, ...keysPayload]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_DELETE_MANY, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_ITEM_DELETE_MANY failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            if (response.status !== STATUS_OK)
+                throw new Error(`Item Delete Many failed: ${getStatusString(response.status)}: ${response.message}`);
             return response.message;
         });
     }
-    /**
-     * Lists all items (key-value pairs) within a specific collection.
-     * @param collectionName The name of the collection.
-     * @returns A CollectionItemListResult object containing the message and a map of items.
-     * @throws An error if the operation fails.
-     */
     collectionItemList(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = writeString(collectionName);
-            const response = yield this.sendCommand(CMD_COLLECTION_ITEM_LIST, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_ITEM_LIST failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
-            const rawMap = JSON.parse(response.data.toString("utf8")); // Go server returns map[string]string (where value is Base64 or direct JSON for _system)
+            const response = yield this.sendCommand(CMD_COLLECTION_ITEM_LIST, writeString(collectionName));
+            if (response.status !== STATUS_OK)
+                throw new Error(`Item List failed: ${getStatusString(response.status)}: ${response.message}`);
+            const rawMap = JSON.parse(response.data.toString("utf8"));
             const decodedMap = {};
             for (const key in rawMap) {
                 try {
-                    // Special handling for _system collection: values are directly JSON objects (sanitized by server)
-                    // This mirrors the Go client's `isCollectionItemListSystemCmd` logic.
                     if (collectionName === "_system" && key.startsWith("user:")) {
                         decodedMap[key] = JSON.parse(rawMap[key]);
                     }
                     else {
-                        // For all other collections, values are Base64 encoded JSON, as seen in Go client's `readResponse`.
                         const decodedVal = Buffer.from(rawMap[key], "base64");
                         decodedMap[key] = JSON.parse(decodedVal.toString("utf8"));
                     }
                 }
                 catch (e) {
-                    console.warn(`DBClient: Warning - Failed to decode or parse JSON for key '${key}' in collection item list: ${e.message}. Raw: ${rawMap[key]}`);
-                    decodedMap[key] = rawMap[key]; // Fallback to raw string if parsing fails
+                    decodedMap[key] = rawMap[key];
                 }
             }
             return { message: response.message, items: decodedMap };
         });
     }
-    /**
-     * Executes a complex query on a specific collection.
-     * @param collectionName The name of the collection.
-     * @param query The Query object defining filter, order, limit, aggregations, etc.
-     * @returns The query results as a generic type.
-     * @throws An error if the operation fails or query JSON is invalid.
-     */
     collectionQuery(collectionName, query) {
         return __awaiter(this, void 0, void 0, function* () {
-            const collectionNameBuffer = writeString(collectionName);
-            const queryJSONBuffer = writeBytes(Buffer.from(JSON.stringify(query))); // Query object as JSON bytes
-            const payload = Buffer.concat([collectionNameBuffer, queryJSONBuffer]);
+            const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(query)))]);
             const response = yield this.sendCommand(CMD_COLLECTION_QUERY, payload);
-            if (response.status !== STATUS_OK) {
-                throw new Error(`COLLECTION_QUERY failed: ${getStatusString(response.status)}: ${response.message}`);
-            }
+            if (response.status !== STATUS_OK)
+                throw new Error(`Query failed: ${getStatusString(response.status)}: ${response.message}`);
             try {
-                // The Go server sends query results directly as JSON, without Base64 encoding.
                 return JSON.parse(response.data.toString("utf8"));
             }
             catch (e) {
-                console.error(`DBClient: Error parsing COLLECTION_QUERY result as JSON: ${e.message}. Raw: ${response.data.toString("utf8")}`);
-                throw new Error(`COLLECTION_QUERY failed: Invalid JSON format for query results.`);
+                throw new Error("Query failed: Invalid JSON response.");
             }
         });
     }
-    /**
-     * Returns true if the current client session is authenticated.
-     */
     isSessionAuthenticated() {
         return this.isAuthenticatedSession;
     }
-    /**
-     * Returns the username of the currently authenticated user, or null if not authenticated.
-     */
     getAuthenticatedUsername() {
         return this.authenticatedUser;
     }
-    // Closes the underlying socket connection.
     close() {
         if (this.socket && !this.socket.destroyed) {
             this.socket.end();
         }
-        this.isAuthenticatedSession = false;
-        this.authenticatedUser = null;
     }
 }
-// Export the client for use in other modules.
 export default MemoryToolsClient;
