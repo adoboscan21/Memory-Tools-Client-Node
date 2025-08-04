@@ -120,8 +120,17 @@ async function runTests() {
       // --- Final Cleanup ---
       console.log("\n--- Running Final Cleanup ---");
       // Delete remaining items before deleting collection
-      const allItems = await client.collectionItemList(collName);
-      const allKeys = Object.keys(allItems);
+
+      // ====================================================================
+      // ⬇️⬇️⬇️ INICIO DE LA SECCIÓN AJUSTADA ⬇️⬇️⬇️
+      // ====================================================================
+      // Use `collectionQuery` to get all remaining items, then map to their keys.
+      const allItemsArray = await client.collectionQuery(collName, {});
+      const allKeys = allItemsArray.map(item => item._id);
+      // ====================================================================
+      // ⬆️⬆️⬆️ FIN DE LA SECCIÓN AJUSTADA ⬆️⬆️⬆️
+      // ====================================================================
+
       if (allKeys.length > 0) {
         await client.collectionItemDeleteMany(collName, allKeys);
         console.log(`✔ Success: Deleted remaining ${allKeys.length} items.`);

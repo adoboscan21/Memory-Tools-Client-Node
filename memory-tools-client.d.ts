@@ -11,11 +11,6 @@ declare module "memory-tools-client" {
     value: T | null;
   }
 
-  /** Represents a dictionary of items, where the key is the item's _id. */
-  export interface CollectionItemList<T = any> {
-    [key: string]: T;
-  }
-
   // --- Interfaces for queries ---
 
   export interface OrderByClause {
@@ -141,11 +136,6 @@ declare module "memory-tools-client" {
       collectionName: string,
       keys: string[]
     ): Promise<string>;
-
-    /** Returns a dictionary of all items in a collection. WARNING: Can be memory-intensive for large collections. */
-    public collectionItemList<T = any>(
-      collectionName: string
-    ): Promise<CollectionItemList<T>>;
 
     /** Executes a complex query on a collection. */
     public collectionQuery<T = any>(

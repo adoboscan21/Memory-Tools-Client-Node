@@ -22,7 +22,6 @@ const CMD_COLLECTION_ITEM_SET = 9;
 const CMD_COLLECTION_ITEM_SET_MANY = 10;
 const CMD_COLLECTION_ITEM_GET = 11;
 const CMD_COLLECTION_ITEM_DELETE = 12;
-const CMD_COLLECTION_ITEM_LIST = 13;
 const CMD_COLLECTION_QUERY = 14;
 const CMD_COLLECTION_ITEM_DELETE_MANY = 15;
 const CMD_COLLECTION_ITEM_UPDATE = 16;
@@ -188,7 +187,10 @@ export class MemoryToolsClient {
     // ====================================================================
     performAuthentication(username, password) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(username), writeString(password)]);
+            const payload = Buffer.concat([
+                writeString(username),
+                writeString(password),
+            ]);
             this.socket.write(Buffer.concat([Buffer.from([CMD_AUTHENTICATE]), payload]));
             const { status, message } = yield this.waitForResponse();
             if (status === STATUS_OK) {
@@ -216,7 +218,10 @@ export class MemoryToolsClient {
             if (commandType !== CMD_AUTHENTICATE && !this.isAuthenticatedSession) {
                 throw new Error("Not authenticated. Connect with credentials first.");
             }
-            const commandBuffer = Buffer.concat([Buffer.from([commandType]), payloadBuffer]);
+            const commandBuffer = Buffer.concat([
+                Buffer.from([commandType]),
+                payloadBuffer,
+            ]);
             this.socket.write(commandBuffer);
             return this.waitForResponse();
         });
@@ -272,7 +277,10 @@ export class MemoryToolsClient {
     /** Creates an index on a field to speed up queries. */
     collectionIndexCreate(collectionName, fieldName) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(collectionName), writeString(fieldName)]);
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                writeString(fieldName),
+            ]);
             const response = yield this.sendCommand(CMD_COLLECTION_INDEX_CREATE, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Index Create failed: ${getStatusString(response.status)}: ${response.message}`);
@@ -282,7 +290,10 @@ export class MemoryToolsClient {
     /** Deletes an index from a field. */
     collectionIndexDelete(collectionName, fieldName) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(collectionName), writeString(fieldName)]);
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                writeString(fieldName),
+            ]);
             const response = yield this.sendCommand(CMD_COLLECTION_INDEX_DELETE, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Index Delete failed: ${getStatusString(response.status)}: ${response.message}`);
@@ -318,7 +329,10 @@ export class MemoryToolsClient {
     /** Sets multiple items from a list of dictionaries in a single batch operation. */
     collectionItemSetMany(collectionName, items) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(items)))]);
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                writeBytes(Buffer.from(JSON.stringify(items))),
+            ]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET_MANY, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Set Many failed: ${getStatusString(response.status)}: ${response.message}`);
@@ -331,7 +345,7 @@ export class MemoryToolsClient {
             const payload = Buffer.concat([
                 writeString(collectionName),
                 writeString(key),
-                writeBytes(Buffer.from(JSON.stringify(patchValue)))
+                writeBytes(Buffer.from(JSON.stringify(patchValue))),
             ]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_UPDATE, payload);
             if (response.status !== STATUS_OK)
@@ -342,7 +356,10 @@ export class MemoryToolsClient {
     /** Partially updates multiple items in a single batch. `items` must be `[{'_id': 'key1', 'patch': {...}}, ...]`. */
     collectionItemUpdateMany(collectionName, items) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(items)))]);
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                writeBytes(Buffer.from(JSON.stringify(items))),
+            ]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_UPDATE_MANY, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Update Many failed: ${getStatusString(response.status)}: ${response.message}`);
@@ -352,19 +369,29 @@ export class MemoryToolsClient {
     /** Retrieves a single item from a collection. */
     collectionItemGet(collectionName, key) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(collectionName), writeString(key)]);
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                writeString(key),
+            ]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_GET, payload);
             if (response.status === STATUS_NOT_FOUND)
                 return { found: false, message: response.message, value: null };
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Get failed: ${getStatusString(response.status)}: ${response.message}`);
-            return { found: true, message: response.message, value: JSON.parse(response.data.toString("utf8")) };
+            return {
+                found: true,
+                message: response.message,
+                value: JSON.parse(response.data.toString("utf8")),
+            };
         });
     }
     /** Deletes a single item from a collection by its key. */
     collectionItemDelete(collectionName, key) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(collectionName), writeString(key)]);
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                writeString(key),
+            ]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_DELETE, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Delete failed: ${getStatusString(response.status)}: ${response.message}`);
@@ -376,41 +403,25 @@ export class MemoryToolsClient {
         return __awaiter(this, void 0, void 0, function* () {
             const keysCountBuffer = Buffer.alloc(4);
             keysCountBuffer.writeUInt32LE(keys.length, 0);
-            const keysPayload = keys.map(key => writeString(key));
-            const payload = Buffer.concat([writeString(collectionName), keysCountBuffer, ...keysPayload]);
+            const keysPayload = keys.map((key) => writeString(key));
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                keysCountBuffer,
+                ...keysPayload,
+            ]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_DELETE_MANY, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Delete Many failed: ${getStatusString(response.status)}: ${response.message}`);
             return response.message;
         });
     }
-    /** Returns a dictionary of all items in a collection.
-     * WARNING: This can be slow and memory-intensive for large collections. Prefer `collectionQuery`.
-     */
-    collectionItemList(collectionName) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const response = yield this.sendCommand(CMD_COLLECTION_ITEM_LIST, writeString(collectionName));
-            if (response.status !== STATUS_OK)
-                throw new Error(`Item List failed: ${getStatusString(response.status)}: ${response.message}`);
-            const rawMap = JSON.parse(response.data.toString("utf8"));
-            const decodedMap = {};
-            for (const key in rawMap) {
-                try {
-                    const decodedVal = Buffer.from(rawMap[key], "base64");
-                    decodedMap[key] = JSON.parse(decodedVal.toString("utf8"));
-                }
-                catch (e) {
-                    // If it fails (e.g., sanitized non-base64 data), assign raw value
-                    decodedMap[key] = rawMap[key];
-                }
-            }
-            return decodedMap;
-        });
-    }
     /** Executes a complex query on a collection. */
     collectionQuery(collectionName, query) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(query)))]);
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                writeBytes(Buffer.from(JSON.stringify(query))),
+            ]);
             const response = yield this.sendCommand(CMD_COLLECTION_QUERY, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Query failed: ${getStatusString(response.status)}: ${response.message}`);
