@@ -4,23 +4,19 @@ declare module "memory-tools-client" {
 
   // --- Interfaces for results---
 
+  /** Represents the result of a get operation on a single item. */
   export interface GetResult<T = any> {
     found: boolean;
     message: string;
     value: T | null;
   }
 
-  export interface CollectionListResult {
-    message: string;
-    names: string[];
+  /** Represents a dictionary of items, where the key is the item's _id. */
+  export interface CollectionItemList<T = any> {
+    [key: string]: T;
   }
 
-  export interface CollectionItemListResult<T = any> {
-    message: string;
-    items: { [key: string]: T };
-  }
-
-  // --- Interfaces for querys ---
+  // --- Interfaces for queries ---
 
   export interface OrderByClause {
     field: string;
@@ -44,78 +40,119 @@ declare module "memory-tools-client" {
     distinct?: string;
   }
 
-  // --- Principal Class Client ---
+  // --- Main Client Class ---
 
-  export default class MemoryToolsClient {
+  export class MemoryToolsClient {
+    /**
+     * Creates a new client instance.
+     * @param host Server IP address or hostname.
+     * @param port Server TLS port.
+     * @param username Optional username for authentication.
+     * @param password Optional password for authentication.
+     * @param serverCertPath Optional path to the server's CA certificate for verification.
+     * @param rejectUnauthorized If `False`, disables certificate verification (not for production). Defaults to `True`.
+     */
     constructor(
       host: string,
       port: number,
-      username?: string | null,
-      password?: string | null,
-      serverCertPath?: string | null,
+      username?: string,
+      password?: string,
+      serverCertPath?: string,
       rejectUnauthorized?: boolean
     );
 
-    socket: tls.TLSSocket | null;
+    /** Indicates if the client session is currently authenticated. */
+    public readonly isAuthenticatedSession: boolean;
 
-    connect(): Promise<tls.TLSSocket>;
+    /** The username of the authenticated user, or null. */
+    public readonly authenticatedUser: string | null;
 
-    close(): void;
+    /** Establishes a TLS connection and authenticates. */
+    public connect(): Promise<tls.TLSSocket>;
 
-    isSessionAuthenticated(): boolean;
+    /** Closes the connection to the server. */
+    public close(): void;
 
-    getAuthenticatedUsername(): string | null;
+    /** Ensures a collection with the given name exists. */
+    public collectionCreate(collectionName: string): Promise<string>;
 
-    set<T = any>(key: string, value: T, ttlSeconds?: number): Promise<string>;
+    /** Deletes an entire collection and all of its items. */
+    public collectionDelete(collectionName: string): Promise<string>;
 
-    get<T = any>(key: string): Promise<GetResult<T>>;
+    /** Lists the names of all collections the current user can access. */
+    public collectionList(): Promise<string[]>;
 
-    collectionCreate(collectionName: string): Promise<string>;
-
-    collectionDelete(collectionName: string): Promise<string>;
-
-    collectionList(): Promise<CollectionListResult>;
-
-    collectionIndexCreate(
+    /** Creates an index on a field to speed up queries. */
+    public collectionIndexCreate(
       collectionName: string,
       fieldName: string
     ): Promise<string>;
 
-    collectionIndexDelete(
+    /** Deletes an index from a field. */
+    public collectionIndexDelete(
       collectionName: string,
       fieldName: string
     ): Promise<string>;
 
-    collectionIndexList<T = string[]>(collectionName: string): Promise<T>;
+    /** Returns a list of indexed fields for a collection. */
+    public collectionIndexList(collectionName: string): Promise<string[]>;
 
-    collectionItemSet<T = any>(
+    /** Sets an item (JSON document) within a collection. */
+    public collectionItemSet<T = any>(
       collectionName: string,
       key: string,
       value: T,
       ttlSeconds?: number
     ): Promise<string>;
 
-    collectionItemSetMany<T = any>(
+    /** Sets multiple items from a list of dictionaries in a single batch operation. */
+    public collectionItemSetMany<T extends { _id?: string }>(
       collectionName: string,
-      values: T[]
+      items: T[]
     ): Promise<string>;
 
-    collectionItemGet<T = any>(
+    /** Partially updates an existing item. Only the fields in `patchValue` will be added or overwritten. */
+    public collectionItemUpdate<T = any>(
+      collectionName: string,
+      key: string,
+      patchValue: Partial<T>
+    ): Promise<string>;
+
+    /** Partially updates multiple items in a single batch. */
+    public collectionItemUpdateMany<T = any>(
+      collectionName: string,
+      items: { _id: string; patch: Partial<T> }[]
+    ): Promise<string>;
+
+    /** Retrieves a single item from a collection. */
+    public collectionItemGet<T = any>(
       collectionName: string,
       key: string
     ): Promise<GetResult<T>>;
 
-    collectionItemDelete(collectionName: string, key: string): Promise<string>;
+    /** Deletes a single item from a collection by its key. */
+    public collectionItemDelete(
+      collectionName: string,
+      key: string
+    ): Promise<string>;
 
-    collectionItemDeleteMany(
+    /** Deletes multiple items from a collection by their keys in a single batch. */
+    public collectionItemDeleteMany(
       collectionName: string,
       keys: string[]
     ): Promise<string>;
 
-    collectionItemList<T = any>(
+    /** Returns a dictionary of all items in a collection. WARNING: Can be memory-intensive for large collections. */
+    public collectionItemList<T = any>(
       collectionName: string
-    ): Promise<CollectionItemListResult<T>>;
+    ): Promise<CollectionItemList<T>>;
 
-    collectionQuery<T = any>(collectionName: string, query: Query): Promise<T>;
+    /** Executes a complex query on a collection. */
+    public collectionQuery<T = any>(
+      collectionName: string,
+      query: Query
+    ): Promise<T>;
   }
+
+  export default MemoryToolsClient;
 }
