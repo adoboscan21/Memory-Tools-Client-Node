@@ -10,10 +10,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 import tls from "node:tls";
 import fs from "node:fs";
 import { Buffer } from "node:buffer";
-// --- Protocol Constants (must match internal/protocol/protocol.go) ---
-// COMMAND TYPES - Corrected to match Go's iota values
-const CMD_SET = 1;
-const CMD_GET = 2;
+// --- Protocol Constants (Synchronized with internal/protocol/protocol.go) ---
+// COMMAND TYPES - Only client-facing commands are used in the public API.
 const CMD_COLLECTION_CREATE = 3;
 const CMD_COLLECTION_DELETE = 4;
 const CMD_COLLECTION_LIST = 5;
@@ -27,98 +25,72 @@ const CMD_COLLECTION_ITEM_DELETE = 12;
 const CMD_COLLECTION_ITEM_LIST = 13;
 const CMD_COLLECTION_QUERY = 14;
 const CMD_COLLECTION_ITEM_DELETE_MANY = 15;
-const CMD_AUTHENTICATE = 16;
-// RESPONSE STATUS
+const CMD_COLLECTION_ITEM_UPDATE = 16;
+const CMD_COLLECTION_ITEM_UPDATE_MANY = 17;
+const CMD_AUTHENTICATE = 18;
+// Administrative commands are not exposed in this client library.
+// RESPONSE STATUS CODES
 const STATUS_OK = 1;
 const STATUS_NOT_FOUND = 2;
 const STATUS_ERROR = 3;
 const STATUS_BAD_COMMAND = 4;
 const STATUS_UNAUTHORIZED = 5;
 const STATUS_BAD_REQUEST = 6;
-// Helper function to get status string for better error messages
+// --- Helper Functions & Interfaces ---
+/** Converts a numeric status code to its string representation for better error messages. */
 function getStatusString(status) {
-    switch (status) {
-        case STATUS_OK:
-            return "OK";
-        case STATUS_NOT_FOUND:
-            return "NOT_FOUND";
-        case STATUS_ERROR:
-            return "ERROR";
-        case STATUS_BAD_COMMAND:
-            return "BAD_COMMAND";
-        case STATUS_UNAUTHORIZED:
-            return "UNAUTHORIZED";
-        case STATUS_BAD_REQUEST:
-            return "BAD_REQUEST";
-        default:
-            return "UNKNOWN_STATUS";
-    }
+    const statuses = {
+        [STATUS_OK]: "OK",
+        [STATUS_NOT_FOUND]: "NOT_FOUND",
+        [STATUS_ERROR]: "ERROR",
+        [STATUS_BAD_COMMAND]: "BAD_COMMAND",
+        [STATUS_UNAUTHORIZED]: "UNAUTHORIZED",
+        [STATUS_BAD_REQUEST]: "BAD_REQUEST",
+    };
+    return statuses[status] || "UNKNOWN_STATUS";
 }
-// Helper: Writes a length-prefixed string (uint32 LE length + string bytes)
+/** Helper: Writes a length-prefixed string (uint32 LE length + string bytes). */
 function writeString(str) {
+    const strBuffer = Buffer.from(str, "utf8");
     const lenBuffer = Buffer.alloc(4);
-    lenBuffer.writeUInt32LE(Buffer.byteLength(str, "utf8"), 0);
-    return Buffer.concat([lenBuffer, Buffer.from(str, "utf8")]);
+    lenBuffer.writeUInt32LE(strBuffer.length, 0);
+    return Buffer.concat([lenBuffer, strBuffer]);
 }
-// Helper: Writes a length-prefixed byte array (uint32 LE length + byte array)
+/** Helper: Writes a length-prefixed byte array (uint32 LE length + byte array). */
 function writeBytes(bytes) {
     const lenBuffer = Buffer.alloc(4);
     lenBuffer.writeUInt32LE(bytes.length, 0);
     return Buffer.concat([lenBuffer, bytes]);
 }
-// Helper to read N bytes from the socket, handling partial reads
-function readNBytes(socket, n) {
-    return new Promise((resolve, reject) => {
-        if (n === 0) {
-            return resolve(Buffer.alloc(0));
-        }
-        const buffer = Buffer.alloc(n);
-        let bytesRead = 0;
-        const onData = (chunk) => {
-            const bytesToCopy = Math.min(chunk.length, n - bytesRead);
-            chunk.copy(buffer, bytesRead, 0, bytesToCopy);
-            bytesRead += bytesToCopy;
-            if (bytesRead >= n) {
-                socket.removeListener("data", onData);
-                socket.removeListener("error", onError);
-                resolve(buffer);
-            }
-        };
-        const onError = (err) => {
-            socket.removeListener("data", onData);
-            socket.removeListener("error", onError);
-            reject(err);
-        };
-        socket.on("data", onData);
-        socket.on("error", onError);
-    });
-}
-// --- DB Client Class ---
+// --- Main DB Client Class ---
 export class MemoryToolsClient {
-    constructor(host, port, username = null, password = null, serverCertPath = null, rejectUnauthorized = true) {
-        this.host = host;
-        this.port = port;
-        this.username = username;
-        this.password = password;
-        this.serverCertPath = serverCertPath;
-        this.rejectUnauthorized = rejectUnauthorized;
+    constructor(host, port, username, password, serverCertPath, rejectUnauthorized = true) {
         this.socket = null;
         this.connectingPromise = null;
         this.isAuthenticatedSession = false;
         this.authenticatedUser = null;
+        this.responseBuffer = Buffer.alloc(0);
+        this.responseWaiter = null;
+        this.host = host;
+        this.port = port;
+        this.username = username || null;
+        this.password = password || null;
+        this.serverCertPath = serverCertPath || null;
+        this.rejectUnauthorized = rejectUnauthorized;
     }
     /**
-     * Establishes a TLS connection and authenticates.
+     * Establishes a TLS connection and authenticates if credentials are provided.
+     * Handles reconnection logic automatically.
      */
     connect() {
         return __awaiter(this, void 0, void 0, function* () {
-            if (this.socket && !this.socket.destroyed && this.isAuthenticatedSession) {
+            if (this.socket && !this.socket.destroyed) {
                 return this.socket;
             }
             if (this.connectingPromise) {
                 return this.connectingPromise;
             }
-            this.connectingPromise = new Promise((resolve, reject) => __awaiter(this, void 0, void 0, function* () {
+            this.connectingPromise = new Promise((resolve, reject) => {
                 const options = {
                     host: this.host,
                     port: this.port,
@@ -129,133 +101,148 @@ export class MemoryToolsClient {
                         options.ca = [fs.readFileSync(this.serverCertPath)];
                     }
                     catch (err) {
-                        this.connectingPromise = null;
                         return reject(new Error(`Failed to read server certificate: ${err.message}`));
                     }
                 }
-                this.socket = tls.connect(options, () => __awaiter(this, void 0, void 0, function* () {
-                    var _a, _b;
-                    if (!this.socket.authorized && this.rejectUnauthorized) {
-                        const authError = this.socket.authorizationError;
-                        (_a = this.socket) === null || _a === void 0 ? void 0 : _a.destroy();
-                        this.connectingPromise = null;
-                        return reject(new Error(`TLS connection unauthorized: ${authError}`));
+                const socket = tls.connect(options, () => __awaiter(this, void 0, void 0, function* () {
+                    if (!socket.authorized && this.rejectUnauthorized) {
+                        return reject(new Error(`TLS connection unauthorized: ${socket.authorizationError}`));
                     }
-                    if (this.username && this.password) {
-                        try {
+                    this.socket = socket;
+                    this.setupSocketListeners();
+                    try {
+                        if (this.username && this.password) {
                             yield this.performAuthentication(this.username, this.password);
-                            resolve(this.socket);
                         }
-                        catch (authErr) {
-                            (_b = this.socket) === null || _b === void 0 ? void 0 : _b.destroy();
-                            this.connectingPromise = null;
-                            reject(authErr);
-                        }
-                    }
-                    else {
-                        this.isAuthenticatedSession = false; // Not authenticated if no credentials are provided
                         resolve(this.socket);
                     }
+                    catch (authErr) {
+                        reject(authErr);
+                    }
+                    finally {
+                        this.connectingPromise = null;
+                    }
                 }));
-                this.socket.on("error", (err) => {
-                    this.socket = null;
-                    this.connectingPromise = null;
-                    this.isAuthenticatedSession = false;
-                    this.authenticatedUser = null;
-                    reject(err);
-                });
-                this.socket.on("close", () => {
-                    this.socket = null;
-                    this.connectingPromise = null;
-                    this.isAuthenticatedSession = false;
-                    this.authenticatedUser = null;
-                });
-            }));
+                socket.on("error", (err) => this.cleanup(reject, err));
+                socket.on("close", () => this.cleanup());
+            });
             return this.connectingPromise;
         });
     }
-    readFullResponse() {
-        return __awaiter(this, void 0, void 0, function* () {
-            if (!this.socket)
-                throw new Error("Socket is not available.");
-            const statusByte = yield readNBytes(this.socket, 1);
-            const status = statusByte.readUInt8(0);
-            const msgLenBuffer = yield readNBytes(this.socket, 4);
-            const msgLen = msgLenBuffer.readUInt32LE(0);
-            const msgBuffer = yield readNBytes(this.socket, msgLen);
-            const message = msgBuffer.toString("utf8");
-            const dataLenBuffer = yield readNBytes(this.socket, 4);
-            const dataLen = dataLenBuffer.readUInt32LE(0);
-            const dataBuffer = yield readNBytes(this.socket, dataLen);
-            return { status, message, data: dataBuffer };
+    setupSocketListeners() {
+        if (!this.socket)
+            return;
+        this.socket.on("data", (chunk) => {
+            this.responseBuffer = Buffer.concat([this.responseBuffer, chunk]);
+            this.tryProcessResponse();
         });
     }
+    // ====================================================================
+    // ⬇️⬇️⬇️ INICIO DE LA SECCIÓN CORREGIDA ⬇️⬇️⬇️
+    // ====================================================================
+    tryProcessResponse() {
+        // If no promise is waiting for a response, do nothing.
+        if (!this.responseWaiter)
+            return;
+        // Loop to process multiple complete responses that might be in the buffer
+        while (true) {
+            // --- Step 1: Check for the minimum header (status + msgLen) ---
+            const MIN_HEADER_SIZE = 5; // 1 byte for status, 4 for msgLen
+            if (this.responseBuffer.length < MIN_HEADER_SIZE) {
+                // Not enough data for the basic header, exit the loop and wait for more.
+                return;
+            }
+            const msgLen = this.responseBuffer.readUInt32LE(1);
+            // --- Step 2: Check for the full message and the data length field ---
+            const REQUIRED_FOR_DATA_LEN = MIN_HEADER_SIZE + msgLen + 4; // Header + Message + dataLen (4 bytes)
+            if (this.responseBuffer.length < REQUIRED_FOR_DATA_LEN) {
+                // The full message or the dataLen field hasn't arrived yet, exit.
+                return;
+            }
+            const dataLen = this.responseBuffer.readUInt32LE(MIN_HEADER_SIZE + msgLen);
+            // --- Step 3: Check for the complete packet (including the data itself) ---
+            const totalPacketLength = REQUIRED_FOR_DATA_LEN + dataLen;
+            if (this.responseBuffer.length < totalPacketLength) {
+                // The full data payload hasn't arrived yet, exit.
+                return;
+            }
+            // --- If we get here, we have a complete packet ready to process ---
+            const status = this.responseBuffer.readUInt8(0);
+            const message = this.responseBuffer.toString("utf8", MIN_HEADER_SIZE, MIN_HEADER_SIZE + msgLen);
+            const data = this.responseBuffer.subarray(REQUIRED_FOR_DATA_LEN, totalPacketLength);
+            const response = { status, message, data };
+            // Consume the packet from the buffer, leaving the rest for the next iteration.
+            this.responseBuffer = this.responseBuffer.subarray(totalPacketLength);
+            // Resolve the promise that was waiting for this response.
+            const waiter = this.responseWaiter;
+            this.responseWaiter = null;
+            waiter(response);
+            // If nobody is waiting for the next response, stop the loop.
+            if (!this.responseWaiter) {
+                return;
+            }
+        }
+    }
+    // ====================================================================
+    // ⬆️⬆️⬆️ FIN DE LA SECCIÓN CORREGIDA ⬆️⬆️⬆️
+    // ====================================================================
     performAuthentication(username, password) {
         return __awaiter(this, void 0, void 0, function* () {
-            if (!this.socket || this.socket.destroyed) {
-                throw new Error("Cannot authenticate, socket is not connected.");
-            }
             const payload = Buffer.concat([writeString(username), writeString(password)]);
-            const commandBuffer = Buffer.concat([Buffer.from([CMD_AUTHENTICATE]), payload]);
-            this.socket.write(commandBuffer);
-            const { status, message } = yield this.readFullResponse();
+            this.socket.write(Buffer.concat([Buffer.from([CMD_AUTHENTICATE]), payload]));
+            const { status, message } = yield this.waitForResponse();
             if (status === STATUS_OK) {
                 this.isAuthenticatedSession = true;
                 this.authenticatedUser = username;
                 return message;
             }
             else {
-                this.isAuthenticatedSession = false;
-                this.authenticatedUser = null;
+                this.cleanup();
                 throw new Error(`Authentication failed: ${getStatusString(status)}: ${message}`);
             }
         });
     }
+    waitForResponse() {
+        return new Promise((resolve) => {
+            this.responseWaiter = resolve;
+            this.tryProcessResponse(); // Check if the response is already in the buffer
+        });
+    }
     sendCommand(commandType, payloadBuffer) {
         return __awaiter(this, void 0, void 0, function* () {
-            if (!this.socket || this.socket.destroyed) {
-                throw new Error("Not connected. Call connect() first.");
-            }
+            yield this.connect(); // Ensure we are connected
+            if (!this.socket)
+                throw new Error("Not connected.");
             if (commandType !== CMD_AUTHENTICATE && !this.isAuthenticatedSession) {
                 throw new Error("Not authenticated. Connect with credentials first.");
             }
             const commandBuffer = Buffer.concat([Buffer.from([commandType]), payloadBuffer]);
             this.socket.write(commandBuffer);
-            return this.readFullResponse();
+            return this.waitForResponse();
         });
     }
-    // --- Public API Methods ---
-    set(key_1, value_1) {
-        return __awaiter(this, arguments, void 0, function* (key, value, ttlSeconds = 0) {
-            // FIX: Create buffer first, then write to it.
-            const ttlBuffer = Buffer.alloc(8);
-            ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0);
-            const payload = Buffer.concat([
-                writeString(key),
-                writeBytes(Buffer.from(JSON.stringify(value))),
-                ttlBuffer, // Pass the buffer variable
-            ]);
-            const response = yield this.sendCommand(CMD_SET, payload);
-            if (response.status !== STATUS_OK)
-                throw new Error(`SET failed: ${getStatusString(response.status)}: ${response.message}`);
-            return response.message;
-        });
+    cleanup(reject, err) {
+        var _a;
+        if (this.connectingPromise && reject && err) {
+            this.connectingPromise = null;
+            reject(err);
+        }
+        (_a = this.socket) === null || _a === void 0 ? void 0 : _a.destroy();
+        this.socket = null;
+        this.connectingPromise = null;
+        this.isAuthenticatedSession = false;
+        this.authenticatedUser = null;
+        this.responseBuffer = Buffer.alloc(0);
     }
-    get(key) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const response = yield this.sendCommand(CMD_GET, writeString(key));
-            if (response.status === STATUS_NOT_FOUND)
-                return { found: false, message: response.message, value: null };
-            if (response.status !== STATUS_OK)
-                throw new Error(`GET failed: ${getStatusString(response.status)}: ${response.message}`);
-            try {
-                return { found: true, message: response.message, value: JSON.parse(response.data.toString("utf8")) };
-            }
-            catch (e) {
-                throw new Error("GET failed: Invalid JSON in stored value.");
-            }
-        });
+    /** Closes the connection to the server. */
+    close() {
+        if (this.socket && !this.socket.destroyed) {
+            this.socket.end();
+        }
+        this.cleanup();
     }
+    // --- Public Client API (el resto del código no cambia) ---
+    /** Ensures a collection with the given name exists. */
     collectionCreate(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_CREATE, writeString(collectionName));
@@ -264,6 +251,7 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
+    /** Deletes an entire collection and all of its items. */
     collectionDelete(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_DELETE, writeString(collectionName));
@@ -272,19 +260,16 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
+    /** Lists the names of all collections the current user can access. */
     collectionList() {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_LIST, Buffer.alloc(0));
             if (response.status !== STATUS_OK)
                 throw new Error(`Collection List failed: ${getStatusString(response.status)}: ${response.message}`);
-            try {
-                return { message: response.message, names: JSON.parse(response.data.toString("utf8")) };
-            }
-            catch (e) {
-                throw new Error("Collection List failed: Invalid JSON response.");
-            }
+            return JSON.parse(response.data.toString("utf8"));
         });
     }
+    /** Creates an index on a field to speed up queries. */
     collectionIndexCreate(collectionName, fieldName) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([writeString(collectionName), writeString(fieldName)]);
@@ -294,6 +279,7 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
+    /** Deletes an index from a field. */
     collectionIndexDelete(collectionName, fieldName) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([writeString(collectionName), writeString(fieldName)]);
@@ -303,29 +289,25 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
+    /** Returns a list of indexed fields for a collection. */
     collectionIndexList(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_INDEX_LIST, writeString(collectionName));
             if (response.status !== STATUS_OK)
                 throw new Error(`Index List failed: ${getStatusString(response.status)}: ${response.message}`);
-            try {
-                return JSON.parse(response.data.toString("utf8"));
-            }
-            catch (e) {
-                throw new Error("Index List failed: Invalid JSON response.");
-            }
+            return JSON.parse(response.data.toString("utf8"));
         });
     }
+    /** Sets an item (JSON document) within a collection. */
     collectionItemSet(collectionName_1, key_1, value_1) {
         return __awaiter(this, arguments, void 0, function* (collectionName, key, value, ttlSeconds = 0) {
-            // FIX: Create buffer first, then write to it.
             const ttlBuffer = Buffer.alloc(8);
             ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0);
             const payload = Buffer.concat([
                 writeString(collectionName),
                 writeString(key),
                 writeBytes(Buffer.from(JSON.stringify(value))),
-                ttlBuffer, // Pass the buffer variable
+                ttlBuffer,
             ]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET, payload);
             if (response.status !== STATUS_OK)
@@ -333,15 +315,41 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    collectionItemSetMany(collectionName, values) {
+    /** Sets multiple items from a list of dictionaries in a single batch operation. */
+    collectionItemSetMany(collectionName, items) {
         return __awaiter(this, void 0, void 0, function* () {
-            const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(values)))]);
+            const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(items)))]);
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET_MANY, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Set Many failed: ${getStatusString(response.status)}: ${response.message}`);
             return response.message;
         });
     }
+    /** Partially updates an existing item. Only the fields in `patchValue` will be added or overwritten. */
+    collectionItemUpdate(collectionName, key, patchValue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const payload = Buffer.concat([
+                writeString(collectionName),
+                writeString(key),
+                writeBytes(Buffer.from(JSON.stringify(patchValue)))
+            ]);
+            const response = yield this.sendCommand(CMD_COLLECTION_ITEM_UPDATE, payload);
+            if (response.status !== STATUS_OK)
+                throw new Error(`Item Update failed: ${getStatusString(response.status)}: ${response.message}`);
+            return response.message;
+        });
+    }
+    /** Partially updates multiple items in a single batch. `items` must be `[{'_id': 'key1', 'patch': {...}}, ...]`. */
+    collectionItemUpdateMany(collectionName, items) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(items)))]);
+            const response = yield this.sendCommand(CMD_COLLECTION_ITEM_UPDATE_MANY, payload);
+            if (response.status !== STATUS_OK)
+                throw new Error(`Item Update Many failed: ${getStatusString(response.status)}: ${response.message}`);
+            return response.message;
+        });
+    }
+    /** Retrieves a single item from a collection. */
     collectionItemGet(collectionName, key) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([writeString(collectionName), writeString(key)]);
@@ -350,14 +358,10 @@ export class MemoryToolsClient {
                 return { found: false, message: response.message, value: null };
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Get failed: ${getStatusString(response.status)}: ${response.message}`);
-            try {
-                return { found: true, message: response.message, value: JSON.parse(response.data.toString("utf8")) };
-            }
-            catch (e) {
-                throw new Error("Item Get failed: Invalid JSON in stored value.");
-            }
+            return { found: true, message: response.message, value: JSON.parse(response.data.toString("utf8")) };
         });
     }
+    /** Deletes a single item from a collection by its key. */
     collectionItemDelete(collectionName, key) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([writeString(collectionName), writeString(key)]);
@@ -367,6 +371,7 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
+    /** Deletes multiple items from a collection by their keys in a single batch. */
     collectionItemDeleteMany(collectionName, keys) {
         return __awaiter(this, void 0, void 0, function* () {
             const keysCountBuffer = Buffer.alloc(4);
@@ -379,6 +384,9 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
+    /** Returns a dictionary of all items in a collection.
+     * WARNING: This can be slow and memory-intensive for large collections. Prefer `collectionQuery`.
+     */
     collectionItemList(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_LIST, writeString(collectionName));
@@ -388,45 +396,26 @@ export class MemoryToolsClient {
             const decodedMap = {};
             for (const key in rawMap) {
                 try {
-                    if (collectionName === "_system" && key.startsWith("user:")) {
-                        decodedMap[key] = JSON.parse(rawMap[key]);
-                    }
-                    else {
-                        const decodedVal = Buffer.from(rawMap[key], "base64");
-                        decodedMap[key] = JSON.parse(decodedVal.toString("utf8"));
-                    }
+                    const decodedVal = Buffer.from(rawMap[key], "base64");
+                    decodedMap[key] = JSON.parse(decodedVal.toString("utf8"));
                 }
                 catch (e) {
+                    // If it fails (e.g., sanitized non-base64 data), assign raw value
                     decodedMap[key] = rawMap[key];
                 }
             }
-            return { message: response.message, items: decodedMap };
+            return decodedMap;
         });
     }
+    /** Executes a complex query on a collection. */
     collectionQuery(collectionName, query) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([writeString(collectionName), writeBytes(Buffer.from(JSON.stringify(query)))]);
             const response = yield this.sendCommand(CMD_COLLECTION_QUERY, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Query failed: ${getStatusString(response.status)}: ${response.message}`);
-            try {
-                return JSON.parse(response.data.toString("utf8"));
-            }
-            catch (e) {
-                throw new Error("Query failed: Invalid JSON response.");
-            }
+            return JSON.parse(response.data.toString("utf8"));
         });
-    }
-    isSessionAuthenticated() {
-        return this.isAuthenticatedSession;
-    }
-    getAuthenticatedUsername() {
-        return this.authenticatedUser;
-    }
-    close() {
-        if (this.socket && !this.socket.destroyed) {
-            this.socket.end();
-        }
     }
 }
 export default MemoryToolsClient;
