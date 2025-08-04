@@ -267,10 +267,6 @@ Deletes an item by its key.
 
 Deletes multiple items by their keys in a batch.
 
-#### `collectionItemList<T>(collName: string): Promise<CollectionItemList<T>>`
-
-Lists all items in a collection. **Warning:** Use with caution on large collections.
-
 ### Query Operations
 
 #### `collectionQuery<T>(collectionName: string, query: Query): Promise<T>`
