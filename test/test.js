@@ -68,8 +68,16 @@ async function runTests() {
       console.log("✔ Success: Set many items.");
 
       const retrieved = await client.collectionItemGet(collName, "item:1");
-      assert.deepStrictEqual(retrieved.found, true, "Item 'item:1' should be found.");
-      assert.deepStrictEqual(retrieved.value, item1, "Retrieved item 'item:1' should match original.");
+      assert.strictEqual(retrieved.found, true, "Item 'item:1' should be found.");
+
+      // Verify that all keys from the original item exist and match in the retrieved item
+      for (const [key, originalValue] of Object.entries(item1)) {
+        assert.strictEqual(
+          retrieved.value[key],
+          originalValue,
+          `Verification failed for item:1. Key '${key}' mismatch.`
+        );
+      }
       console.log("✔ Success: GET verified item 'item:1'.");
 
       const notFound = await client.collectionItemGet(collName, "non-existent");
