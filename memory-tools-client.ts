@@ -57,6 +57,13 @@ export interface GetResult<T = any> {
   value: T | null;
 }
 
+export interface LookupClause {
+  from: string;
+  localField: string;
+  foreignField: string;
+  as: string;
+}
+
 export interface Query {
   filter?: { [key: string]: any };
   orderBy?: { field: string; direction: "asc" | "desc" }[];
@@ -72,6 +79,8 @@ export interface Query {
   groupBy?: string[];
   having?: { [key: string]: any };
   distinct?: string;
+  projection?: string[];
+  lookups?: LookupClause[];
 }
 
 /** Helper: Writes a length-prefixed string (uint32 LE length + string bytes). */

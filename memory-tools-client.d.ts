@@ -23,6 +23,13 @@ declare module "memory-tools-client" {
     field: string;
   }
 
+  export interface LookupClause {
+    from: string;
+    localField: string;
+    foreignField: string;
+    as: string;
+  }
+
   export interface Query {
     filter?: { [key: string]: any };
     orderBy?: OrderByClause[];
@@ -33,6 +40,8 @@ declare module "memory-tools-client" {
     groupBy?: string[];
     having?: { [key: string]: any };
     distinct?: string;
+    projection?: string[];
+    lookups?: LookupClause[];
   }
 
   // --- Main Client Class ---
