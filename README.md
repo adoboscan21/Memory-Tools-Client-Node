@@ -95,6 +95,8 @@ You create a `Query` object by passing properties:
 - `group_by` (array): Groups results by one or more fields to perform aggregations.
 - `aggregations` (object): Defines aggregation functions to run on groups (e.g., `SUM`, `AVG`, `COUNT`).
 - `having` (object): Filters the results _after_ grouping and aggregation (like a `HAVING` clause).
+- **`projection` (array of strings)**: Selects which fields to return in the final results, reducing network traffic.
+- **`lookups` (array of objects)**: Enriches documents by joining data from other collections in a pipeline, similar to a `LEFT JOIN`.
 
 ### Building Filters
 
@@ -138,6 +140,67 @@ const query = {
 const results = await client.collectionQuery("products", query);
 ```
 
+### Joins and Data Enrichment with `lookups`
+
+The **`lookups`** parameter allows you to perform powerful server-side joins to enrich your query results. It accepts an array of lookup objects, which are executed in a sequence (a pipeline). This is extremely efficient as it avoids making multiple round-trips to the database.
+
+Each lookup object has the following structure:
+
+| Property       | Description                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `from`         | The name of the other collection to join with.                                                                                     |
+| `localField`   | The field from the current set of documents to use for the join. Dot notation is supported for nested fields (e.g., `details.id`). |
+| `foreignField` | The field in the `from` collection that `localField` should match.                                                                 |
+| `as`           | The name of the new field where the joined document(s) will be stored.                                                             |
+
+**Example: Chained Lookups & Projection** Let's query an `inventory_status` collection and enrich it with data from `products` and then `suppliers`.
+
+```javascript
+// Query: Get the status of all items in stock, and for each,
+// join the product's name and price, and then the supplier's name.
+// Finally, project a clean, flat structure.
+
+const reportQuery = {
+  // 1. Start with the inventory and filter
+  filter: { field: "status", op: "=", value: "in_stock" },
+
+  // 2. Perform a pipeline of lookups
+  lookups: [
+    {
+      from: "products",
+      localField: "productId",
+      foreignField: "_id",
+      as: "product",
+    },
+    {
+      from: "suppliers",
+      localField: "product.supplierId", // Use a nested field from the previous lookup
+      foreignField: "_id",
+      as: "supplier",
+    },
+  ],
+
+  // 3. Select only the fields we need for the final report
+  projection: ["product.name", "product.price", "stock", "supplier.name"],
+};
+
+const report = await client.collectionQuery("inventory_status", reportQuery);
+console.log(JSON.stringify(report, null, 2));
+// Example output:
+// [
+//   {
+//     "product": { "name": "MechKey Pro", "price": 159.99 },
+//     "stock": 75,
+//     "supplier": { "name": "GigaWare" }
+//   },
+//   {
+//     "product": { "name": "ErgoMouse X", "price": 89.99 },
+//     "stock": 120,
+//     "supplier": { "name": "InnoGadget" }
+//   }
+// ]
+```
+
 ### Deep Query Example: Aggregations & Grouping
 
 You can perform powerful data analysis directly on the server.
@@ -175,8 +238,6 @@ console.log(JSON.stringify(analyticsResult, null, 2));
 //   { "category": "appliances", "productCount": 8, "averagePrice": 620.50 }
 // ]
 ```
-
----
 
 ## ⚡ API Reference
 
