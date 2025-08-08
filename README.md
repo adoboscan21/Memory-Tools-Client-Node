@@ -87,12 +87,12 @@ The `Query` interface is the most powerful feature of the client, allowing you t
 You create a `Query` object by passing properties:
 
 - `filter` (object): Defines conditions to select items (like a `WHERE` clause).
-- `orderBy` (array): Sorts the results based on one or more fields.
+- `order_by` (array): Sorts the results based on one or more fields.
 - `limit` (number): Restricts the maximum number of results returned.
 - `offset` (number): Skips a specified number of results, used for pagination.
 - `count` (boolean): If `true`, returns a count of matching items instead of the items themselves.
 - `distinct` (string): Returns a list of unique values for the specified field.
-- `groupBy` (array): Groups results by one or more fields to perform aggregations.
+- `group_by` (array): Groups results by one or more fields to perform aggregations.
 - `aggregations` (object): Defines aggregation functions to run on groups (e.g., `SUM`, `AVG`, `COUNT`).
 - `having` (object): Filters the results _after_ grouping and aggregation (like a `HAVING` clause).
 
@@ -152,7 +152,7 @@ const deepQuery = {
   filter: { field: "price", op: ">", value: 100 },
 
   // 2. Grouping
-  groupBy: ["category"],
+  group_by: ["category"],
 
   // 3. Aggregations to perform on each group
   aggregations: {
@@ -164,7 +164,7 @@ const deepQuery = {
   having: { field: "productCount", op: ">", value: 5 },
 
   // 5. Ordering the final results
-  orderBy: [{ field: "averagePrice", direction: "desc" }],
+  order_by: [{ field: "averagePrice", direction: "desc" }],
 };
 
 const analyticsResult = await client.collectionQuery("products", deepQuery);

@@ -25,12 +25,12 @@ declare module "memory-tools-client" {
 
   export interface Query {
     filter?: { [key: string]: any };
-    orderBy?: OrderByClause[];
+    order_by?: OrderByClause[];
     limit?: number;
     offset?: number;
     count?: boolean;
     aggregations?: { [key: string]: Aggregation };
-    groupBy?: string[];
+    group_by?: string[];
     having?: { [key: string]: any };
     distinct?: string;
   }

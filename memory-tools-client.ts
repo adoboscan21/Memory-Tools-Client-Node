@@ -59,7 +59,7 @@ export interface GetResult<T = any> {
 
 export interface Query {
   filter?: { [key: string]: any };
-  orderBy?: { field: string; direction: "asc" | "desc" }[];
+  order_by?: { field: string; direction: "asc" | "desc" }[];
   limit?: number;
   offset?: number;
   count?: boolean;
@@ -69,7 +69,7 @@ export interface Query {
       field: string;
     };
   };
-  groupBy?: string[];
+  group_by?: string[];
   having?: { [key: string]: any };
   distinct?: string;
 }
