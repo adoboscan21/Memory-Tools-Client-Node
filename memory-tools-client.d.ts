@@ -54,7 +54,7 @@ declare module "memory-tools-client" {
      * @param username Optional username for authentication.
      * @param password Optional password for authentication.
      * @param serverCertPath Optional path to the server's CA certificate for verification.
-     * @param rejectUnauthorized If `False`, disables certificate verification (not for production). Defaults to `True`.
+     * @param rejectUnauthorized If `false`, disables certificate verification (not recommended for production). Defaults to `true`.
      */
     constructor(
       host: string,
@@ -77,7 +77,27 @@ declare module "memory-tools-client" {
     /** Closes the connection to the server. */
     public close(): void;
 
-    /** Ensures a collection with the given name exists. */
+    // --- Transaction Methods ---
+
+    /**
+     * Starts a new transaction.
+     * All subsequent commands will be part of this transaction until `commit` or `rollback` is called.
+     */
+    public begin(): Promise<string>;
+
+    /**
+     * Commits the current active transaction, making all its changes permanent.
+     */
+    public commit(): Promise<string>;
+
+    /**
+     * Rolls back the current active transaction, discarding all its changes.
+     */
+    public rollback(): Promise<string>;
+
+    // --- Collection & Index Methods ---
+
+    /** Creates a new collection. */
     public collectionCreate(collectionName: string): Promise<string>;
 
     /** Deletes an entire collection and all of its items. */
@@ -100,16 +120,29 @@ declare module "memory-tools-client" {
 
     /** Returns a list of indexed fields for a collection. */
     public collectionIndexList(collectionName: string): Promise<string[]>;
+    
+    // --- Item (CRUD) Methods ---
 
-    /** Sets an item (JSON document) within a collection. */
+    /**
+     * Sets an item (JSON document) within a collection.
+     * If `key` is not provided, a UUID will be generated automatically.
+     *
+     * @param collectionName The name of the collection.
+     * @param value The document to store.
+     * @param key (Optional) The unique key for the item. If not provided, a UUID is generated.
+     * @param ttlSeconds (Optional) Time-to-live in seconds for the item. Defaults to 0 (no expiry).
+     */
     public collectionItemSet<T = any>(
       collectionName: string,
-      key: string,
       value: T,
+      key?: string,
       ttlSeconds?: number
     ): Promise<string>;
 
-    /** Sets multiple items from a list of dictionaries in a single batch operation. */
+    /**
+     * Sets multiple items in a single batch operation.
+     * Assigns a UUID to any item that does not have an `_id` field.
+     */
     public collectionItemSetMany<T extends { _id?: string }>(
       collectionName: string,
       items: T[]

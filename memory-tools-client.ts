@@ -1,9 +1,9 @@
 import tls from "node:tls";
 import fs from "node:fs";
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto"; // <-- Imported for UUID generation
 
-// --- Protocol Constants (Synchronized with internal/protocol/protocol.go) ---
-// COMMAND TYPES - Only client-facing commands are used in the public API.
+// --- Protocol Constants (Synchronized with Python client and Go server) ---
 const CMD_COLLECTION_CREATE = 3;
 const CMD_COLLECTION_DELETE = 4;
 const CMD_COLLECTION_LIST = 5;
@@ -19,9 +19,12 @@ const CMD_COLLECTION_ITEM_DELETE_MANY = 15;
 const CMD_COLLECTION_ITEM_UPDATE = 16;
 const CMD_COLLECTION_ITEM_UPDATE_MANY = 17;
 const CMD_AUTHENTICATE = 18;
-// Administrative commands are not exposed in this client library.
+// NEW TRANSACTION COMMANDS
+const CMD_BEGIN = 25;
+const CMD_COMMIT = 26;
+const CMD_ROLLBACK = 27;
 
-// RESPONSE STATUS CODES
+// --- Server Response Statuses ---
 const STATUS_OK = 1;
 const STATUS_NOT_FOUND = 2;
 const STATUS_ERROR = 3;
@@ -29,9 +32,9 @@ const STATUS_BAD_COMMAND = 4;
 const STATUS_UNAUTHORIZED = 5;
 const STATUS_BAD_REQUEST = 6;
 
-// --- Helper Functions & Interfaces ---
+// --- Helper Functions, Interfaces & Type Definitions ---
 
-/** Converts a numeric status code to its string representation for better error messages. */
+/** Converts a numeric status code to its string representation. */
 function getStatusString(status: number): string {
   const statuses: { [key: number]: string } = {
     [STATUS_OK]: "OK",
@@ -44,7 +47,6 @@ function getStatusString(status: number): string {
   return statuses[status] || "UNKNOWN_STATUS";
 }
 
-// --- Type Definitions ---
 interface CommandResponse {
   status: number;
   message: string;
@@ -199,43 +201,22 @@ export class MemoryToolsClient {
     });
   }
 
-  // ====================================================================
-  // ⬇️⬇️⬇️ INICIO DE LA SECCIÓN CORREGIDA ⬇️⬇️⬇️
-  // ====================================================================
   private tryProcessResponse(): void {
-    // If no promise is waiting for a response, do nothing.
     if (!this.responseWaiter) return;
-
-    // Loop to process multiple complete responses that might be in the buffer
     while (true) {
-      // --- Step 1: Check for the minimum header (status + msgLen) ---
-      const MIN_HEADER_SIZE = 5; // 1 byte for status, 4 for msgLen
-      if (this.responseBuffer.length < MIN_HEADER_SIZE) {
-        // Not enough data for the basic header, exit the loop and wait for more.
-        return;
-      }
+      const MIN_HEADER_SIZE = 5; // 1 byte status, 4 bytes msgLen
+      if (this.responseBuffer.length < MIN_HEADER_SIZE) return;
 
       const msgLen = this.responseBuffer.readUInt32LE(1);
-
-      // --- Step 2: Check for the full message and the data length field ---
-      const REQUIRED_FOR_DATA_LEN = MIN_HEADER_SIZE + msgLen + 4; // Header + Message + dataLen (4 bytes)
-      if (this.responseBuffer.length < REQUIRED_FOR_DATA_LEN) {
-        // The full message or the dataLen field hasn't arrived yet, exit.
-        return;
-      }
+      const REQUIRED_FOR_DATA_LEN = MIN_HEADER_SIZE + msgLen + 4;
+      if (this.responseBuffer.length < REQUIRED_FOR_DATA_LEN) return;
 
       const dataLen = this.responseBuffer.readUInt32LE(
         MIN_HEADER_SIZE + msgLen
       );
-
-      // --- Step 3: Check for the complete packet (including the data itself) ---
       const totalPacketLength = REQUIRED_FOR_DATA_LEN + dataLen;
-      if (this.responseBuffer.length < totalPacketLength) {
-        // The full data payload hasn't arrived yet, exit.
-        return;
-      }
+      if (this.responseBuffer.length < totalPacketLength) return;
 
-      // --- If we get here, we have a complete packet ready to process ---
       const status = this.responseBuffer.readUInt8(0);
       const message = this.responseBuffer.toString(
         "utf8",
@@ -248,24 +229,15 @@ export class MemoryToolsClient {
       );
 
       const response: CommandResponse = { status, message, data };
-
-      // Consume the packet from the buffer, leaving the rest for the next iteration.
       this.responseBuffer = this.responseBuffer.subarray(totalPacketLength);
 
-      // Resolve the promise that was waiting for this response.
       const waiter = this.responseWaiter;
       this.responseWaiter = null;
       waiter(response);
 
-      // If nobody is waiting for the next response, stop the loop.
-      if (!this.responseWaiter) {
-        return;
-      }
+      if (!this.responseWaiter) return;
     }
   }
-  // ====================================================================
-  // ⬆️⬆️⬆️ FIN DE LA SECCIÓN CORREGIDA ⬆️⬆️⬆️
-  // ====================================================================
 
   private async performAuthentication(
     username: string,
@@ -338,9 +310,53 @@ export class MemoryToolsClient {
     this.cleanup();
   }
 
-  // --- Public Client API (el resto del código no cambia) ---
+  // --- Public Client API ---
 
-  /** Ensures a collection with the given name exists. */
+  /**
+   * Starts a new transaction.
+   * All subsequent commands will be part of this transaction until `commit` or `rollback` is called.
+   */
+  public async begin(): Promise<string> {
+    const response = await this.sendCommand(CMD_BEGIN, Buffer.alloc(0));
+    if (response.status !== STATUS_OK) {
+      throw new Error(
+        `Begin failed: ${getStatusString(response.status)}: ${response.message}`
+      );
+    }
+    return response.message;
+  }
+
+  /**
+   * Commits the current active transaction, making all its changes permanent.
+   */
+  public async commit(): Promise<string> {
+    const response = await this.sendCommand(CMD_COMMIT, Buffer.alloc(0));
+    if (response.status !== STATUS_OK) {
+      throw new Error(
+        `Commit failed: ${getStatusString(response.status)}: ${
+          response.message
+        }`
+      );
+    }
+    return response.message;
+  }
+
+  /**
+   * Rolls back the current active transaction, discarding all its changes.
+   */
+  public async rollback(): Promise<string> {
+    const response = await this.sendCommand(CMD_ROLLBACK, Buffer.alloc(0));
+    if (response.status !== STATUS_OK) {
+      throw new Error(
+        `Rollback failed: ${getStatusString(response.status)}: ${
+          response.message
+        }`
+      );
+    }
+    return response.message;
+  }
+
+  /** Creates a new collection. */
   public async collectionCreate(collectionName: string): Promise<string> {
     const response = await this.sendCommand(
       CMD_COLLECTION_CREATE,
@@ -444,18 +460,30 @@ export class MemoryToolsClient {
     return JSON.parse(response.data.toString("utf8"));
   }
 
-  /** Sets an item (JSON document) within a collection. */
+  /**
+   * Sets an item (JSON document) within a collection.
+   * If `key` is not provided, a UUID will be generated, and the `_id` field will be set on the value object.
+   *
+   * @param collectionName The name of the collection.
+   * @param value The document to store.
+   * @param key (Optional) The unique key for the item. If not provided, a UUID is generated.
+   * @param ttlSeconds (Optional) Time-to-live in seconds for the item. Defaults to 0 (no expiry).
+   * @returns A confirmation message from the server.
+   */
   public async collectionItemSet<T = any>(
     collectionName: string,
-    key: string,
     value: T,
+    key?: string,
     ttlSeconds: number = 0
   ): Promise<string> {
+    const itemKey = key || randomUUID();
+    (value as any)._id = itemKey; // Ensure the document itself contains the _id
+
     const ttlBuffer = Buffer.alloc(8);
     ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0);
     const payload = Buffer.concat([
       writeString(collectionName),
-      writeString(key),
+      writeString(itemKey),
       writeBytes(Buffer.from(JSON.stringify(value))),
       ttlBuffer,
     ]);
@@ -469,11 +497,23 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Sets multiple items from a list of dictionaries in a single batch operation. */
+  /**
+   * Sets multiple items in a single batch operation. Assigns a UUID to any item that does not have an `_id` field.
+   *
+   * @param collectionName The name of the collection.
+   * @param items An array of documents to store.
+   * @returns A confirmation message from the server.
+   */
   public async collectionItemSetMany<T extends { _id?: string }>(
     collectionName: string,
     items: T[]
   ): Promise<string> {
+    for (const item of items) {
+      if (!item._id) {
+        item._id = randomUUID();
+      }
+    }
+
     const payload = Buffer.concat([
       writeString(collectionName),
       writeBytes(Buffer.from(JSON.stringify(items))),

@@ -1,176 +1,344 @@
-import MemoryToolsClient from "../memory-tools-client.js";
 import assert from "node:assert";
+import { randomUUID } from "node:crypto";
+import MemoryToolsClient from "../memory-tools-client.js";
 
-// --- Configuration ---
-const HOST = "127.0.0.1";
+// --- Test Environment Configuration ---
+// Modify these variables if your server runs in another location or with different credentials
+const HOST = "localhost";
 const PORT = 5876;
-const ADMIN_USER = "admin";
-const ADMIN_PASS = "adminpass";
-// For local testing, cert validation is often disabled.
-const CERT_PATH = null;
+const USERNAME = "admin"; // A user with write permissions on '*'
+const PASSWORD = "adminpass";
+const SERVER_CERT_PATH = undefined; // Path to the server's certificate or undefined
 const REJECT_UNAUTHORIZED = false;
 
-async function runTests() {
-  console.log("🚀 Starting Memory Tools JavaScript client tests...");
+// --- Helper Functions for Printing ---
 
-  // --- Test: Failed Authentication ---
-  console.log("\n--- Test: Failed Authentication (incorrect credentials) ---");
-  let clientBadAuth = null;
+function printHeader(title) {
+  console.log("\n" + "=".repeat(60));
+  console.log(`--- ${title.toUpperCase()} ---`);
+  console.log("=".repeat(60));
+}
+
+function printStep(step, description) {
+  console.log(`\n${step}. ${description}...`);
+}
+
+/**
+ * A helper to wrap test promises, printing success or failure.
+ * In Node.js, the client throws an error on failure, which is caught here.
+ */
+async function checkResult(description, promiseFn) {
   try {
-    clientBadAuth = new MemoryToolsClient(HOST, PORT, "bad_user", "bad_pass", CERT_PATH, REJECT_UNAUTHORIZED);
-    await clientBadAuth.connect();
-    console.error("✖ TEST FAILED: Authentication with incorrect credentials unexpectedly succeeded.");
-  } catch (error) {
-    console.log(`✔ Success: Authentication failed as expected: ${error.message}`);
-  } finally {
-    clientBadAuth?.close();
-  }
-
-  // --- Main Test Suite with 'admin' User ---
-  console.log("\n--- Starting Main Test Suite with 'admin' User ---");
-  const client = new MemoryToolsClient(HOST, PORT, ADMIN_USER, ADMIN_PASS, CERT_PATH, REJECT_UNAUTHORIZED);
-  const collName = "node_test_collection";
-
-  try {
-    await client.connect();
-    assert.strictEqual(client.isAuthenticatedSession, true, "Session should be authenticated");
-    console.log(`✔ Success: Connected and authenticated as '${client.authenticatedUser}'.`);
-
-    // This inner try/finally ensures the test collection is always cleaned up
-    try {
-      // --- Collection and Index Lifecycle ---
-      console.log("\n--- Testing Collection & Index Lifecycle ---");
-      await client.collectionCreate(collName);
-      console.log(`✔ Success: Collection '${collName}' created.`);
-
-      let collections = await client.collectionList();
-      assert.ok(collections.includes(collName), "Collection should exist in list after creation");
-      console.log(`✔ Success: Collection '${collName}' found in list.`);
-
-      await client.collectionIndexCreate(collName, "city");
-      console.log("✔ Success: Index on 'city' created.");
-
-      let indexes = await client.collectionIndexList(collName);
-      assert.ok(indexes.includes("city"), "Index should exist in list after creation");
-      console.log(`✔ Success: Index list verified: [${indexes.join(", ")}]`);
-
-      // --- Item Operations (CRUD) ---
-      console.log("\n--- Testing Item CRUD Operations ---");
-      const item1 = { _id: "item:1", city: "Madrid", active: true };
-      const manyItems = [
-        { _id: "item:2", city: "Barcelona", active: true },
-        { _id: "item:3", city: "Madrid", active: false },
-      ];
-
-      await client.collectionItemSet(collName, item1._id, item1);
-      console.log("✔ Success: Set single item.");
-      await client.collectionItemSetMany(collName, manyItems);
-      console.log("✔ Success: Set many items.");
-
-      const retrieved = await client.collectionItemGet(collName, "item:1");
-      assert.strictEqual(retrieved.found, true, "Item 'item:1' should be found.");
-
-      // Verify that all keys from the original item exist and match in the retrieved item
-      for (const [key, originalValue] of Object.entries(item1)) {
-        assert.strictEqual(
-          retrieved.value[key],
-          originalValue,
-          `Verification failed for item:1. Key '${key}' mismatch.`
-        );
+    const result = await promiseFn();
+    console.log(`   [SUCCESS]   ${description}`);
+    if (result !== undefined && result !== null) {
+      // Pretty-print if it looks like an object/array
+      if (typeof result === "object") {
+        console.log(`   [DATA]      ${JSON.stringify(result, null, 2)}`);
+      } else {
+        console.log(`   [DATA]      ${result}`);
       }
-      console.log("✔ Success: GET verified item 'item:1'.");
-
-      const notFound = await client.collectionItemGet(collName, "non-existent");
-      assert.strictEqual(notFound.found, false, "GET for non-existent key should return found: false.");
-      console.log("✔ Success: GET for non-existent item behaved as expected.");
-
-      // --- Update Operations ---
-      console.log("\n--- Testing Update Operations ---");
-      await client.collectionItemUpdate(collName, "item:1", { active: false });
-      console.log("✔ Success: UPDATE single item 'item:1'.");
-      const updatedItem1 = await client.collectionItemGet(collName, "item:1");
-      assert.strictEqual(updatedItem1.value.active, false, "Single item update was not applied correctly.");
-      console.log("✔ Success: Verified single item update.");
-
-      await client.collectionItemUpdateMany(collName, [
-        { _id: "item:2", patch: { active: false } },
-        { _id: "item:3", patch: { city: "Valencia" } }
-      ]);
-      console.log("✔ Success: UPDATE MANY items.");
-      const updatedItem2 = await client.collectionItemGet(collName, "item:2");
-      const updatedItem3 = await client.collectionItemGet(collName, "item:3");
-      assert.strictEqual(updatedItem2.value.active, false, "Update many on item:2 failed.");
-      assert.strictEqual(updatedItem3.value.city, "Valencia", "Update many on item:3 failed.");
-      console.log("✔ Success: Verified many item updates.");
-
-      // --- Query Operations ---
-      console.log("\n--- Testing Query Operations ---");
-      const queryResult = await client.collectionQuery(collName, {
-        filter: { field: "city", op: "=", value: "Madrid" },
-      });
-      assert.strictEqual(queryResult.length, 1, "Query for city 'Madrid' should return 1 result.");
-      assert.strictEqual(queryResult[0]._id, "item:1", "Query result should be 'item:1'.");
-      console.log("✔ Success: Filter query returned correct data.");
-
-      const countResult = await client.collectionQuery(collName, { count: true });
-      assert.strictEqual(countResult.count, 3, "Count query should return 3.");
-      console.log(`✔ Success: Count query returned correct count: ${countResult.count}.`);
-
-      // --- Deletion ---
-      await client.collectionItemDelete(collName, "item:1");
-      console.log("✔ Success: DELETED single item.");
-      const afterDelete = await client.collectionItemGet(collName, "item:1");
-      assert.strictEqual(afterDelete.found, false, "Deleted item should not be found.");
-      console.log("✔ Success: Verified single item deletion.");
-
-
-    } finally {
-      // --- Final Cleanup ---
-      console.log("\n--- Running Final Cleanup ---");
-      // Delete remaining items before deleting collection
-
-      // ====================================================================
-      // ⬇️⬇️⬇️ INICIO DE LA SECCIÓN AJUSTADA ⬇️⬇️⬇️
-      // ====================================================================
-      // Use `collectionQuery` to get all remaining items, then map to their keys.
-      const allItemsArray = await client.collectionQuery(collName, {});
-      const allKeys = allItemsArray.map(item => item._id);
-      // ====================================================================
-      // ⬆️⬆️⬆️ FIN DE LA SECCIÓN AJUSTADA ⬆️⬆️⬆️
-      // ====================================================================
-
-      if (allKeys.length > 0) {
-        await client.collectionItemDeleteMany(collName, allKeys);
-        console.log(`✔ Success: Deleted remaining ${allKeys.length} items.`);
-      }
-
-      const indexes = await client.collectionIndexList(collName);
-      if (indexes.includes("city")) {
-        await client.collectionIndexDelete(collName, "city");
-        console.log("✔ Success: Index 'city' deleted.");
-      }
-
-      await client.collectionDelete(collName);
-      console.log(`✔ Success: Collection '${collName}' deleted.`);
-      const collectionsAfterDelete = await client.collectionList();
-      assert.ok(!collectionsAfterDelete.includes(collName), "Collection should not exist after deletion.");
-      console.log(`✔ Success: Collection '${collName}' no longer in list.`);
     }
+    return result;
   } catch (error) {
-    console.error(`\n--- 💥 UNEXPECTED ERROR DURING TESTS 💥 ---`);
-    console.error(`Error: ${error.message}`);
-    console.error(error.stack);
-    if (error.message.includes("ECONNREFUSED")) {
-      console.error("Hint: Is the Go server running? (e.g., `go run .`)");
-    }
-  } finally {
-    console.log("\nClosing connection...");
-    client?.close();
-    console.log("--- All tests finished ---");
+    console.error(`   [FAILURE]   ${description}`);
+    console.error(`   [ERROR]     ${error.message}`);
+    // Exit the process on critical failure to avoid cascading errors
+    process.exit(1);
   }
 }
 
-// To run this test:
-// 1. Start the Go server in a separate terminal: `go run .`
-// 2. Run this script: `node test.js`
-runTests();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function main() {
+  const client = new MemoryToolsClient(
+    HOST,
+    PORT,
+    USERNAME,
+    PASSWORD,
+    SERVER_CERT_PATH,
+    REJECT_UNAUTHORIZED
+  );
+
+  try {
+    await client.connect();
+    if (!client.isAuthenticatedSession) {
+      console.error(
+        "[FAILURE] Initial client authentication failed. Aborting tests."
+      );
+      return;
+    }
+
+    // --- Collections and Indexes Test ---
+    await runCollectionAndIndexTests(client);
+
+    // --- CRUD Operations Test ---
+    await runCrudTests(client);
+
+    // --- Bulk Operations Test ---
+    await runBulkTests(client);
+
+    // --- Transactions Test ---
+    await runTransactionTests(client);
+
+    // --- Complex Queries Test ---
+    await runQueryTests(client);
+  } catch (e) {
+    console.error(`\n\nAn unexpected error occurred during tests: ${e.message}`);
+  } finally {
+    client.close();
+    console.log("\nConnection closed.");
+  }
+}
+
+async function runCollectionAndIndexTests(client) {
+  printHeader("Collection and Index Management Tests");
+  const collName = `test_coll_${randomUUID().slice(0, 8)}`;
+
+  try {
+    await checkResult("Creating collection", () =>
+      client.collectionCreate(collName)
+    );
+
+    printStep(2, "Listing collections to verify creation");
+    const collections = await client.collectionList();
+    if (collections.includes(collName)) {
+      console.log(`   [SUCCESS]   Collection '${collName}' was found in the list.`);
+    } else {
+      console.error(`   [FAILURE]   Collection '${collName}' was NOT found.`);
+    }
+
+    await checkResult("Creating an index on the 'city' field", () =>
+      client.collectionIndexCreate(collName, "city")
+    );
+
+    printStep(4, "Listing indexes to verify creation");
+    const indexes = await client.collectionIndexList(collName);
+    if (indexes.includes("city")) {
+      console.log("   [SUCCESS]   The 'city' index was found.");
+    } else {
+      console.error("   [FAILURE]   The 'city' index was NOT found.");
+    }
+
+    await checkResult("Deleting the 'city' index", () =>
+      client.collectionIndexDelete(collName, "city")
+    );
+
+    printStep(6, "Listing indexes to verify deletion");
+    const indexesAfterDelete = await client.collectionIndexList(collName);
+    if (!indexesAfterDelete.includes("city")) {
+      console.log("   [SUCCESS]   The 'city' index no longer exists.");
+    } else {
+      console.error("   [FAILURE]   The 'city' index still exists.");
+    }
+  } finally {
+    printStep(7, `Cleanup: deleting collection '${collName}'`);
+    await client.collectionDelete(collName);
+  }
+}
+
+async function runCrudTests(client) {
+  printHeader("CRUD Operations Tests (Create, Read, Update, Delete)");
+  const collName = `crud_coll_${randomUUID().slice(0, 8)}`;
+  const itemKey = "user-001";
+
+  try {
+    await client.collectionCreate(collName);
+
+    await checkResult("SET (Create) an item", () =>
+      client.collectionItemSet(collName, { name: "Luisa", age: 40 }, itemKey)
+    );
+
+    printStep(2, "GET (Read) the item");
+    const getResp = await client.collectionItemGet(collName, itemKey);
+    assert(getResp.found, "Item should be found");
+    assert.strictEqual(getResp.value.name, "Luisa");
+    console.log("   [SUCCESS]   Item was retrieved correctly.");
+
+    await checkResult("UPDATE the item", () =>
+      client.collectionItemUpdate(collName, itemKey, {
+        age: 41,
+        status: "active",
+      })
+    );
+
+    printStep(4, "GET (Read) to verify the update");
+    const getUpdatedResp = await client.collectionItemGet(collName, itemKey);
+    assert(getUpdatedResp.found, "Updated item should be found");
+    assert.strictEqual(getUpdatedResp.value.age, 41);
+    console.log("   [SUCCESS]   Item was updated correctly.");
+
+    await checkResult("DELETE the item", () =>
+      client.collectionItemDelete(collName, itemKey)
+    );
+
+    printStep(6, "GET (Read) to verify the deletion");
+    const getDeletedResp = await client.collectionItemGet(collName, itemKey);
+    if (!getDeletedResp.found) {
+      console.log(`   [SUCCESS]   Item '${itemKey}' was not found, as expected.`);
+    } else {
+      console.error(`   [FAILURE]   Item '${itemKey}' still exists.`);
+    }
+  } finally {
+    await client.collectionDelete(collName);
+  }
+}
+
+async function runBulkTests(client) {
+  printHeader("Bulk Operations Tests (set_many, delete_many)");
+  const collName = `bulk_coll_${randomUUID().slice(0, 8)}`;
+
+  try {
+    await client.collectionCreate(collName);
+
+    const itemsToSet = Array.from({ length: 5 }, (_, i) => ({
+      _id: `item-${i}`,
+      val: i * 10,
+    }));
+    const keysToDelete = ["item-1", "item-3"];
+
+    await checkResult("SET MANY: Inserting 5 items", () =>
+      client.collectionItemSetMany(collName, itemsToSet)
+    );
+
+    await checkResult("DELETE MANY: Deleting 2 out of 5 items", () =>
+      client.collectionItemDeleteMany(collName, keysToDelete)
+    );
+
+    await sleep(100); // Give the server time to stabilize state
+
+    printStep(3, "Verifying the final state");
+    const finalItems = await client.collectionQuery(collName, {});
+    const finalKeys = new Set(finalItems.map((item) => item._id));
+    const expectedKeys = new Set(["item-0", "item-2", "item-4"]);
+
+    try {
+      assert.deepStrictEqual(finalKeys, expectedKeys);
+      console.log("   [SUCCESS]   The collection's state is as expected.");
+    } catch (e) {
+      console.error("   [FAILURE]   The final state is not correct.");
+      console.error(`             - Expected: ${[...expectedKeys].join(", ")}`);
+      console.error(`             - Found:    ${[...finalKeys].join(", ")}`);
+    }
+  } finally {
+    await client.collectionDelete(collName);
+  }
+}
+
+async function runTransactionTests(client) {
+  printHeader("Transaction Tests (Commit and Rollback)");
+  const collName = `tx_coll_${randomUUID().slice(0, 8)}`;
+  const keyCommit = "committed-key";
+  const keyRollback = "rolled-back-key";
+
+  try {
+    await client.collectionCreate(collName);
+
+    printStep(1, "Testing a successful COMMIT");
+    await client.begin();
+    await client.collectionItemSet(collName, { tx_status: "final" }, keyCommit);
+    await client.commit();
+    const getCommitted = await client.collectionItemGet(collName, keyCommit);
+    if (getCommitted.found) {
+      console.log(
+        "   [SUCCESS]   The item written in the transaction was found after commit."
+      );
+    } else {
+      console.error("   [FAILURE]   The item was not found after commit.");
+    }
+
+    printStep(2, "Testing a ROLLBACK");
+    await client.begin();
+    await client.collectionItemSet(
+      collName,
+      { tx_status: "temporary" },
+      keyRollback
+    );
+    await client.rollback();
+    const getRolledBack = await client.collectionItemGet(collName, keyRollback);
+    if (!getRolledBack.found) {
+      console.log(
+        "   [SUCCESS]   The item written in the transaction was not found after rollback, as expected."
+      );
+    } else {
+      console.error(
+        "   [FAILURE]   An item that should have been rolled back was found."
+      );
+    }
+  } finally {
+    await client.collectionDelete(collName);
+  }
+}
+
+async function runQueryTests(client) {
+  printHeader("Query Tests (Filter, Projection, Lookup)");
+  const usersColl = `users_${randomUUID().slice(0, 8)}`;
+  const profilesColl = `profiles_${randomUUID().slice(0, 8)}`;
+
+  try {
+    await client.collectionCreate(usersColl);
+    await client.collectionCreate(profilesColl);
+
+    const users = [
+      { _id: "u1", name: "Elena", age: 34, active: true },
+      { _id: "u2", name: "Marcos", age: 25, active: true },
+      { _id: "u3", name: "Sofia", age: 45, active: false },
+    ];
+    const profiles = [
+      { _id: "p1", user_id: "u1", city: "Madrid" },
+      { _id: "p2", user_id: "u2", city: "Bogota" },
+    ];
+    await client.collectionItemSetMany(usersColl, users);
+    await client.collectionItemSetMany(profilesColl, profiles);
+    await sleep(100); // Give the server time to process writes
+
+    printStep(1, "Query with Filter: active users with age > 30");
+    const qFilter = {
+      filter: {
+        and: [
+          { field: "active", op: "=", value: true },
+          { field: "age", op: ">", value: 30 },
+        ],
+      },
+    };
+    const result1 = await checkResult("Executing filter query", () =>
+      client.collectionQuery(usersColl, qFilter)
+    );
+    assert.strictEqual(result1.length, 1);
+    assert.strictEqual(result1[0].name, "Elena");
+
+    printStep(2, "Query with Projection: get only name and age");
+    const qProj = { projection: ["name", "age"] };
+    const result2 = await checkResult("Executing projection query", () =>
+      client.collectionQuery(usersColl, qProj)
+    );
+    assert(result2.every((user) => !("active" in user)));
+    assert(result2.every((user) => "name" in user && "age" in user));
+
+    printStep(3, "Query with Lookup (JOIN): join profiles with users");
+    const qLookup = {
+      lookups: [
+        {
+          from: usersColl,
+          localField: "user_id",
+          foreignField: "_id",
+          as: "user_info",
+        },
+      ],
+    };
+    const result3 = await checkResult("Executing lookup query", () =>
+      client.collectionQuery(profilesColl, qLookup)
+    );
+    const profile1 = result3.find((p) => p._id === "p1");
+    assert(profile1, "Profile p1 should exist");
+    assert.strictEqual(profile1.user_info.name, "Elena");
+  } finally {
+    await client.collectionDelete(usersColl);
+    await client.collectionDelete(profilesColl);
+  }
+}
+
+console.log("Starting test suite for MemoryToolsClient...");
+main().catch((err) => {
+  console.error("\nA critical error stopped the test suite:", err);
+});
