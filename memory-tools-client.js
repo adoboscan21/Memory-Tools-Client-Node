@@ -10,7 +10,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 import tls from "node:tls";
 import fs from "node:fs";
 import { Buffer } from "node:buffer";
-import { randomUUID } from "node:crypto"; // <-- Imported for UUID generation
 // --- Protocol Constants (Synchronized with Python client and Go server) ---
 const CMD_COLLECTION_CREATE = 3;
 const CMD_COLLECTION_DELETE = 4;
@@ -27,7 +26,6 @@ const CMD_COLLECTION_ITEM_DELETE_MANY = 15;
 const CMD_COLLECTION_ITEM_UPDATE = 16;
 const CMD_COLLECTION_ITEM_UPDATE_MANY = 17;
 const CMD_AUTHENTICATE = 18;
-// NEW TRANSACTION COMMANDS
 const CMD_BEGIN = 25;
 const CMD_COMMIT = 26;
 const CMD_ROLLBACK = 27;
@@ -80,10 +78,6 @@ export class MemoryToolsClient {
         this.serverCertPath = serverCertPath || null;
         this.rejectUnauthorized = rejectUnauthorized;
     }
-    /**
-     * Establishes a TLS connection and authenticates if credentials are provided.
-     * Handles reconnection logic automatically.
-     */
     connect() {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.socket && !this.socket.destroyed) {
@@ -143,7 +137,7 @@ export class MemoryToolsClient {
         if (!this.responseWaiter)
             return;
         while (true) {
-            const MIN_HEADER_SIZE = 5; // 1 byte status, 4 bytes msgLen
+            const MIN_HEADER_SIZE = 5;
             if (this.responseBuffer.length < MIN_HEADER_SIZE)
                 return;
             const msgLen = this.responseBuffer.readUInt32LE(1);
@@ -188,12 +182,12 @@ export class MemoryToolsClient {
     waitForResponse() {
         return new Promise((resolve) => {
             this.responseWaiter = resolve;
-            this.tryProcessResponse(); // Check if the response is already in the buffer
+            this.tryProcessResponse();
         });
     }
     sendCommand(commandType, payloadBuffer) {
         return __awaiter(this, void 0, void 0, function* () {
-            yield this.connect(); // Ensure we are connected
+            yield this.connect();
             if (!this.socket)
                 throw new Error("Not connected.");
             if (commandType !== CMD_AUTHENTICATE && !this.isAuthenticatedSession) {
@@ -220,7 +214,6 @@ export class MemoryToolsClient {
         this.authenticatedUser = null;
         this.responseBuffer = Buffer.alloc(0);
     }
-    /** Closes the connection to the server. */
     close() {
         if (this.socket && !this.socket.destroyed) {
             this.socket.end();
@@ -228,10 +221,6 @@ export class MemoryToolsClient {
         this.cleanup();
     }
     // --- Public Client API ---
-    /**
-     * Starts a new transaction.
-     * All subsequent commands will be part of this transaction until `commit` or `rollback` is called.
-     */
     begin() {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_BEGIN, Buffer.alloc(0));
@@ -241,9 +230,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /**
-     * Commits the current active transaction, making all its changes permanent.
-     */
     commit() {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COMMIT, Buffer.alloc(0));
@@ -253,9 +239,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /**
-     * Rolls back the current active transaction, discarding all its changes.
-     */
     rollback() {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_ROLLBACK, Buffer.alloc(0));
@@ -265,7 +248,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Creates a new collection. */
     collectionCreate(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_CREATE, writeString(collectionName));
@@ -274,7 +256,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Deletes an entire collection and all of its items. */
     collectionDelete(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_DELETE, writeString(collectionName));
@@ -283,7 +264,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Lists the names of all collections the current user can access. */
     collectionList() {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_LIST, Buffer.alloc(0));
@@ -292,7 +272,6 @@ export class MemoryToolsClient {
             return JSON.parse(response.data.toString("utf8"));
         });
     }
-    /** Creates an index on a field to speed up queries. */
     collectionIndexCreate(collectionName, fieldName) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([
@@ -305,7 +284,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Deletes an index from a field. */
     collectionIndexDelete(collectionName, fieldName) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([
@@ -318,7 +296,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Returns a list of indexed fields for a collection. */
     collectionIndexList(collectionName) {
         return __awaiter(this, void 0, void 0, function* () {
             const response = yield this.sendCommand(CMD_COLLECTION_INDEX_LIST, writeString(collectionName));
@@ -329,18 +306,15 @@ export class MemoryToolsClient {
     }
     /**
      * Sets an item (JSON document) within a collection.
-     * If `key` is not provided, a UUID will be generated, and the `_id` field will be set on the value object.
+     * If `key` is not provided, the server will generate a unique UUID.
      *
-     * @param collectionName The name of the collection.
-     * @param value The document to store.
-     * @param key (Optional) The unique key for the item. If not provided, a UUID is generated.
-     * @param ttlSeconds (Optional) Time-to-live in seconds for the item. Defaults to 0 (no expiry).
-     * @returns A confirmation message from the server.
+     * @returns The created document, including the server-generated `_id` if applicable.
      */
     collectionItemSet(collectionName_1, value_1, key_1) {
         return __awaiter(this, arguments, void 0, function* (collectionName, value, key, ttlSeconds = 0) {
-            const itemKey = key || randomUUID();
-            value._id = itemKey; // Ensure the document itself contains the _id
+            // --- MODIFICADO ---
+            // Si la clave no se proporciona, enviamos una cadena vacía para que el servidor la genere.
+            const itemKey = key || "";
             const ttlBuffer = Buffer.alloc(8);
             ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0);
             const payload = Buffer.concat([
@@ -352,23 +326,20 @@ export class MemoryToolsClient {
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Set failed: ${getStatusString(response.status)}: ${response.message}`);
-            return response.message;
+            // Devolvemos el documento completo que el servidor nos envía de vuelta.
+            return JSON.parse(response.data.toString("utf8"));
         });
     }
     /**
-     * Sets multiple items in a single batch operation. Assigns a UUID to any item that does not have an `_id` field.
+     * Sets multiple items in a single batch operation.
+     * The server will assign a UUID to any item that does not have an `_id` field.
      *
-     * @param collectionName The name of the collection.
-     * @param items An array of documents to store.
-     * @returns A confirmation message from the server.
+     * @returns An array of the created documents, including server-generated `_id`s.
      */
     collectionItemSetMany(collectionName, items) {
         return __awaiter(this, void 0, void 0, function* () {
-            for (const item of items) {
-                if (!item._id) {
-                    item._id = randomUUID();
-                }
-            }
+            // --- MODIFICADO ---
+            // Se elimina el bucle que generaba UUIDs. La responsabilidad es 100% del servidor.
             const payload = Buffer.concat([
                 writeString(collectionName),
                 writeBytes(Buffer.from(JSON.stringify(items))),
@@ -376,10 +347,10 @@ export class MemoryToolsClient {
             const response = yield this.sendCommand(CMD_COLLECTION_ITEM_SET_MANY, payload);
             if (response.status !== STATUS_OK)
                 throw new Error(`Item Set Many failed: ${getStatusString(response.status)}: ${response.message}`);
-            return response.message;
+            // Devolvemos el array de documentos que el servidor nos envía de vuelta.
+            return JSON.parse(response.data.toString("utf8"));
         });
     }
-    /** Partially updates an existing item. Only the fields in `patchValue` will be added or overwritten. */
     collectionItemUpdate(collectionName, key, patchValue) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([
@@ -393,7 +364,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Partially updates multiple items in a single batch. `items` must be `[{'_id': 'key1', 'patch': {...}}, ...]`. */
     collectionItemUpdateMany(collectionName, items) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([
@@ -406,7 +376,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Retrieves a single item from a collection. */
     collectionItemGet(collectionName, key) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([
@@ -425,7 +394,6 @@ export class MemoryToolsClient {
             };
         });
     }
-    /** Deletes a single item from a collection by its key. */
     collectionItemDelete(collectionName, key) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([
@@ -438,7 +406,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Deletes multiple items from a collection by their keys in a single batch. */
     collectionItemDeleteMany(collectionName, keys) {
         return __awaiter(this, void 0, void 0, function* () {
             const keysCountBuffer = Buffer.alloc(4);
@@ -455,7 +422,6 @@ export class MemoryToolsClient {
             return response.message;
         });
     }
-    /** Executes a complex query on a collection. */
     collectionQuery(collectionName, query) {
         return __awaiter(this, void 0, void 0, function* () {
             const payload = Buffer.concat([

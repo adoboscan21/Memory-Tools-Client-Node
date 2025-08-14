@@ -13,7 +13,6 @@ The `MemoryToolsClient` class allows you to connect to your server. It's recomme
 ```javascript
 // For ESM: import MemoryToolsClient from "memory-tools-client";
 const { MemoryToolsClient } = require("memory-tools-client");
-const { randomUUID } = require("node:crypto");
 
 // Server Configuration
 const DB_HOST = "127.0.0.1";
@@ -293,7 +292,7 @@ Stores an item. If `key` is omitted, a UUID is generated and assigned to the `_i
 
 #### `collectionItemSetMany<T>(collName: string, items: T[]): Promise<string>`
 
-Stores multiple items. Assigns a UUID to the `_id` field of any item that lacks one.
+Stores multiple items. If `key` is omitted, a UUID is generated and assigned to the `_id` property of the `value` object.
 
 #### `collectionItemUpdate<T>(collName: string, key: string, patchValue: Partial<T>): Promise<string>`
 

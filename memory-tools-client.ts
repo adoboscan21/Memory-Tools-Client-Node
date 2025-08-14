@@ -1,7 +1,6 @@
 import tls from "node:tls";
 import fs from "node:fs";
 import { Buffer } from "node:buffer";
-import { randomUUID } from "node:crypto"; // <-- Imported for UUID generation
 
 // --- Protocol Constants (Synchronized with Python client and Go server) ---
 const CMD_COLLECTION_CREATE = 3;
@@ -19,7 +18,6 @@ const CMD_COLLECTION_ITEM_DELETE_MANY = 15;
 const CMD_COLLECTION_ITEM_UPDATE = 16;
 const CMD_COLLECTION_ITEM_UPDATE_MANY = 17;
 const CMD_AUTHENTICATE = 18;
-// NEW TRANSACTION COMMANDS
 const CMD_BEGIN = 25;
 const CMD_COMMIT = 26;
 const CMD_ROLLBACK = 27;
@@ -134,10 +132,6 @@ export class MemoryToolsClient {
     this.rejectUnauthorized = rejectUnauthorized;
   }
 
-  /**
-   * Establishes a TLS connection and authenticates if credentials are provided.
-   * Handles reconnection logic automatically.
-   */
   public async connect(): Promise<tls.TLSSocket> {
     if (this.socket && !this.socket.destroyed) {
       return this.socket;
@@ -204,19 +198,16 @@ export class MemoryToolsClient {
   private tryProcessResponse(): void {
     if (!this.responseWaiter) return;
     while (true) {
-      const MIN_HEADER_SIZE = 5; // 1 byte status, 4 bytes msgLen
+      const MIN_HEADER_SIZE = 5;
       if (this.responseBuffer.length < MIN_HEADER_SIZE) return;
-
       const msgLen = this.responseBuffer.readUInt32LE(1);
       const REQUIRED_FOR_DATA_LEN = MIN_HEADER_SIZE + msgLen + 4;
       if (this.responseBuffer.length < REQUIRED_FOR_DATA_LEN) return;
-
       const dataLen = this.responseBuffer.readUInt32LE(
         MIN_HEADER_SIZE + msgLen
       );
       const totalPacketLength = REQUIRED_FOR_DATA_LEN + dataLen;
       if (this.responseBuffer.length < totalPacketLength) return;
-
       const status = this.responseBuffer.readUInt8(0);
       const message = this.responseBuffer.toString(
         "utf8",
@@ -227,14 +218,11 @@ export class MemoryToolsClient {
         REQUIRED_FOR_DATA_LEN,
         totalPacketLength
       );
-
       const response: CommandResponse = { status, message, data };
       this.responseBuffer = this.responseBuffer.subarray(totalPacketLength);
-
       const waiter = this.responseWaiter;
       this.responseWaiter = null;
       waiter(response);
-
       if (!this.responseWaiter) return;
     }
   }
@@ -250,7 +238,6 @@ export class MemoryToolsClient {
     this.socket!.write(
       Buffer.concat([Buffer.from([CMD_AUTHENTICATE]), payload])
     );
-
     const { status, message } = await this.waitForResponse();
     if (status === STATUS_OK) {
       this.isAuthenticatedSession = true;
@@ -267,7 +254,7 @@ export class MemoryToolsClient {
   private waitForResponse(): Promise<CommandResponse> {
     return new Promise((resolve) => {
       this.responseWaiter = resolve;
-      this.tryProcessResponse(); // Check if the response is already in the buffer
+      this.tryProcessResponse();
     });
   }
 
@@ -275,12 +262,11 @@ export class MemoryToolsClient {
     commandType: number,
     payloadBuffer: Buffer
   ): Promise<CommandResponse> {
-    await this.connect(); // Ensure we are connected
+    await this.connect();
     if (!this.socket) throw new Error("Not connected.");
     if (commandType !== CMD_AUTHENTICATE && !this.isAuthenticatedSession) {
       throw new Error("Not authenticated. Connect with credentials first.");
     }
-
     const commandBuffer = Buffer.concat([
       Buffer.from([commandType]),
       payloadBuffer,
@@ -302,7 +288,6 @@ export class MemoryToolsClient {
     this.responseBuffer = Buffer.alloc(0);
   }
 
-  /** Closes the connection to the server. */
   public close(): void {
     if (this.socket && !this.socket.destroyed) {
       this.socket.end();
@@ -312,10 +297,6 @@ export class MemoryToolsClient {
 
   // --- Public Client API ---
 
-  /**
-   * Starts a new transaction.
-   * All subsequent commands will be part of this transaction until `commit` or `rollback` is called.
-   */
   public async begin(): Promise<string> {
     const response = await this.sendCommand(CMD_BEGIN, Buffer.alloc(0));
     if (response.status !== STATUS_OK) {
@@ -326,9 +307,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /**
-   * Commits the current active transaction, making all its changes permanent.
-   */
   public async commit(): Promise<string> {
     const response = await this.sendCommand(CMD_COMMIT, Buffer.alloc(0));
     if (response.status !== STATUS_OK) {
@@ -341,9 +319,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /**
-   * Rolls back the current active transaction, discarding all its changes.
-   */
   public async rollback(): Promise<string> {
     const response = await this.sendCommand(CMD_ROLLBACK, Buffer.alloc(0));
     if (response.status !== STATUS_OK) {
@@ -356,7 +331,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Creates a new collection. */
   public async collectionCreate(collectionName: string): Promise<string> {
     const response = await this.sendCommand(
       CMD_COLLECTION_CREATE,
@@ -371,7 +345,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Deletes an entire collection and all of its items. */
   public async collectionDelete(collectionName: string): Promise<string> {
     const response = await this.sendCommand(
       CMD_COLLECTION_DELETE,
@@ -386,7 +359,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Lists the names of all collections the current user can access. */
   public async collectionList(): Promise<string[]> {
     const response = await this.sendCommand(
       CMD_COLLECTION_LIST,
@@ -401,7 +373,6 @@ export class MemoryToolsClient {
     return JSON.parse(response.data.toString("utf8"));
   }
 
-  /** Creates an index on a field to speed up queries. */
   public async collectionIndexCreate(
     collectionName: string,
     fieldName: string
@@ -423,7 +394,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Deletes an index from a field. */
   public async collectionIndexDelete(
     collectionName: string,
     fieldName: string
@@ -445,7 +415,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Returns a list of indexed fields for a collection. */
   public async collectionIndexList(collectionName: string): Promise<string[]> {
     const response = await this.sendCommand(
       CMD_COLLECTION_INDEX_LIST,
@@ -462,22 +431,19 @@ export class MemoryToolsClient {
 
   /**
    * Sets an item (JSON document) within a collection.
-   * If `key` is not provided, a UUID will be generated, and the `_id` field will be set on the value object.
+   * If `key` is not provided, the server will generate a unique UUID.
    *
-   * @param collectionName The name of the collection.
-   * @param value The document to store.
-   * @param key (Optional) The unique key for the item. If not provided, a UUID is generated.
-   * @param ttlSeconds (Optional) Time-to-live in seconds for the item. Defaults to 0 (no expiry).
-   * @returns A confirmation message from the server.
+   * @returns The created document, including the server-generated `_id` if applicable.
    */
   public async collectionItemSet<T = any>(
     collectionName: string,
     value: T,
     key?: string,
     ttlSeconds: number = 0
-  ): Promise<string> {
-    const itemKey = key || randomUUID();
-    (value as any)._id = itemKey; // Ensure the document itself contains the _id
+  ): Promise<T> {
+    // --- MODIFICADO ---
+    // Si la clave no se proporciona, enviamos una cadena vacía para que el servidor la genere.
+    const itemKey = key || "";
 
     const ttlBuffer = Buffer.alloc(8);
     ttlBuffer.writeBigInt64LE(BigInt(ttlSeconds), 0);
@@ -494,26 +460,22 @@ export class MemoryToolsClient {
           response.message
         }`
       );
-    return response.message;
+    // Devolvemos el documento completo que el servidor nos envía de vuelta.
+    return JSON.parse(response.data.toString("utf8")) as T;
   }
 
   /**
-   * Sets multiple items in a single batch operation. Assigns a UUID to any item that does not have an `_id` field.
+   * Sets multiple items in a single batch operation.
+   * The server will assign a UUID to any item that does not have an `_id` field.
    *
-   * @param collectionName The name of the collection.
-   * @param items An array of documents to store.
-   * @returns A confirmation message from the server.
+   * @returns An array of the created documents, including server-generated `_id`s.
    */
   public async collectionItemSetMany<T extends { _id?: string }>(
     collectionName: string,
     items: T[]
-  ): Promise<string> {
-    for (const item of items) {
-      if (!item._id) {
-        item._id = randomUUID();
-      }
-    }
-
+  ): Promise<T[]> {
+    // --- MODIFICADO ---
+    // Se elimina el bucle que generaba UUIDs. La responsabilidad es 100% del servidor.
     const payload = Buffer.concat([
       writeString(collectionName),
       writeBytes(Buffer.from(JSON.stringify(items))),
@@ -528,10 +490,10 @@ export class MemoryToolsClient {
           response.message
         }`
       );
-    return response.message;
+    // Devolvemos el array de documentos que el servidor nos envía de vuelta.
+    return JSON.parse(response.data.toString("utf8")) as T[];
   }
 
-  /** Partially updates an existing item. Only the fields in `patchValue` will be added or overwritten. */
   public async collectionItemUpdate<T = any>(
     collectionName: string,
     key: string,
@@ -555,7 +517,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Partially updates multiple items in a single batch. `items` must be `[{'_id': 'key1', 'patch': {...}}, ...]`. */
   public async collectionItemUpdateMany<T = any>(
     collectionName: string,
     items: { _id: string; patch: Partial<T> }[]
@@ -577,7 +538,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Retrieves a single item from a collection. */
   public async collectionItemGet<T = any>(
     collectionName: string,
     key: string
@@ -602,7 +562,6 @@ export class MemoryToolsClient {
     };
   }
 
-  /** Deletes a single item from a collection by its key. */
   public async collectionItemDelete(
     collectionName: string,
     key: string
@@ -624,7 +583,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Deletes multiple items from a collection by their keys in a single batch. */
   public async collectionItemDeleteMany(
     collectionName: string,
     keys: string[]
@@ -650,7 +608,6 @@ export class MemoryToolsClient {
     return response.message;
   }
 
-  /** Executes a complex query on a collection. */
   public async collectionQuery<T = any>(
     collectionName: string,
     query: Query

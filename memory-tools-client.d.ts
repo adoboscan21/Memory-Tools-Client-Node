@@ -120,33 +120,35 @@ declare module "memory-tools-client" {
 
     /** Returns a list of indexed fields for a collection. */
     public collectionIndexList(collectionName: string): Promise<string[]>;
-    
+
     // --- Item (CRUD) Methods ---
 
     /**
      * Sets an item (JSON document) within a collection.
-     * If `key` is not provided, a UUID will be generated automatically.
+     * If `key` is not provided, the server will generate a unique UUID.
      *
      * @param collectionName The name of the collection.
      * @param value The document to store.
-     * @param key (Optional) The unique key for the item. If not provided, a UUID is generated.
-     * @param ttlSeconds (Optional) Time-to-live in seconds for the item. Defaults to 0 (no expiry).
+     * @param key (Optional) The unique key for the item. If not provided, the server generates one.
+     * @param ttlSeconds (Optional) Time-to-live in seconds. Defaults to 0 (no expiry).
+     * @returns The created document, including the server-generated `_id` if applicable.
      */
     public collectionItemSet<T = any>(
       collectionName: string,
       value: T,
       key?: string,
       ttlSeconds?: number
-    ): Promise<string>;
+    ): Promise<T>;
 
     /**
      * Sets multiple items in a single batch operation.
-     * Assigns a UUID to any item that does not have an `_id` field.
+     * The server will assign a UUID to any item that does not have an `_id` field.
+     * @returns An array of the created documents, including server-generated `_id`s.
      */
     public collectionItemSetMany<T extends { _id?: string }>(
       collectionName: string,
       items: T[]
-    ): Promise<string>;
+    ): Promise<T[]>;
 
     /** Partially updates an existing item. Only the fields in `patchValue` will be added or overwritten. */
     public collectionItemUpdate<T = any>(
